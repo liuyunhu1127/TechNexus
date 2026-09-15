@@ -1,0 +1,14 @@
+# TechNexus CODEOWNERS
+#
+# 当前项目处于单人维护阶段。
+# Ruleset 暂未强制 Require code owner review；
+# 当第二位稳定维护者加入后，可按模块拆分 owner 并启用强制 CODEOWNERS Review。
+
+* @liuyunhu1127
+
+# 可在团队扩展后按以下粒度拆分：
+# /technexus-*/            @backend-owner
+# /technexus-web/          @frontend-owner
+# /technexus-admin/        @frontend-owner
+# /.github/                @maintainer
+# /docs/                   @maintainer
