@@ -1,6 +1,6 @@
 # TechNexus
 
-TechNexus 是面向技术内容、真实需求、交付方案和知识沉淀闭环的 Alpha 工程。当前基线使用 Java 21、Spring Boot 3、DDD 限界上下文、MySQL 8.4、Nuxt 3 和 Vue 3。
+TechNexus 是面向技术内容、真实需求、交付方案和知识沉淀闭环的 Alpha 工程。当前基线使用 Java 21、Spring Boot 3.5、DDD 限界上下文、Jetty、MySQL 8.4、Nuxt 3 和 Vue 3。
 
 ## 工程结构
 
@@ -42,4 +42,4 @@ Refresh Token 仅写入 `HttpOnly + Secure + SameSite=Strict` Cookie。调用 `/
 
 ## 当前限制
 
-该仓库仍处于开发阶段。除认证账号和会话外，部分业务接口目前使用进程内应用服务作为可执行原型；MinIO/S3 预签名地址尚未接入真实适配器。这些项目在阶段三评审中属于未关闭阻断项，不可据此部署生产环境。
+该仓库仍处于开发阶段。生产配置以 MySQL/JDBC 为业务事实源，内存实现仅用于测试；S3 预签名、ClamAV 扫描 Worker、AI 建议 Worker、HTTP 幂等和共享登录限流均已有生产适配器与自动测试。真实 S3/ClamAV 联调、性能压测、异地备份及恢复演练属于阶段四验证范围；完成这些测试及上线评审前，不可据此部署生产环境。

@@ -49,6 +49,18 @@ jobs:
       - name: Enforce coverage gates
         shell: pwsh
         run: ./scripts/check-coverage.ps1
+      - name: Generate aggregate CycloneDX SBOM
+        run: >-
+          mvn --settings .mvn/settings.xml --no-transfer-progress
+          org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom
+          -DskipTests -DoutputFormat=json -DoutputName=bom
+      - name: Scan backend SBOM and frontend lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
+        with:
+          scan-args: |-
+            -L target/bom.json
+            -L technexus-web/package-lock.json
+            -L technexus-admin/package-lock.json
 
   frontend:
     runs-on: ubuntu-latest
@@ -96,13 +108,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
           GITLEAKS_ENABLE_COMMENTS: "false"
-
-  dependency-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
-        with:
-          scan-args: |-
-            --recursive
-            ./
