@@ -1,0 +1,27 @@
+:root { color-scheme: light; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; color: #17211d; background: #f5f7f3; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: inherit; text-decoration: none; }
+.site-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem max(5vw, 1rem); background: rgba(255,255,255,.9); border-bottom: 1px solid #dbe4dc; position: sticky; top: 0; backdrop-filter: blur(12px); }
+.brand { font-weight: 800; letter-spacing: -.03em; color: #145c42; }
+nav { display: flex; gap: 1.25rem; }
+nav a[aria-current="page"] { color: #087650; font-weight: 700; }
+main { width: min(1120px, 92vw); margin: 0 auto; min-height: calc(100vh - 150px); }
+.hero { padding: 8rem 0 5rem; max-width: 820px; }
+h1 { font-size: clamp(2.4rem, 7vw, 5.6rem); line-height: .98; letter-spacing: -.055em; margin: .35em 0; }
+.hero > p:not(.eyebrow), .page-heading > p { max-width: 680px; font-size: 1.2rem; color: #506158; }
+.eyebrow { color: #087650; text-transform: uppercase; font-size: .78rem; letter-spacing: .16em; font-weight: 800; }
+.actions { display: flex; gap: .8rem; margin-top: 2rem; }
+.button, button { border: 1px solid #145c42; border-radius: 999px; padding: .75rem 1.1rem; background: transparent; cursor: pointer; }
+.button.primary { background: #145c42; color: white; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; padding-bottom: 5rem; }
+.grid article, .list article, .notice, .auth-card { background: white; border: 1px solid #dbe4dc; border-radius: 20px; padding: 1.5rem; }
+.page-heading { padding: 4rem 0 2rem; }
+.page-heading h1, .auth-card h1 { font-size: clamp(2rem, 5vw, 3.5rem); }
+.list { display: grid; gap: 1rem; }
+.auth-card { width: min(480px, 100%); margin: 5rem auto; }
+form { display: grid; gap: 1rem; }
+label { display: grid; gap: .4rem; font-weight: 700; }
+input { border: 1px solid #aab9ae; border-radius: 10px; padding: .8rem; font: inherit; }
+footer { padding: 2rem 5vw; color: #6b776f; border-top: 1px solid #dbe4dc; }
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .site-header { align-items: flex-start; gap: 1rem; } nav { gap: .7rem; flex-wrap: wrap; justify-content: flex-end; } .hero { padding-top: 5rem; } }

@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: technexus_it
+          MYSQL_USER: tn_app
+          MYSQL_PASSWORD: tn_test_password
+          MYSQL_ROOT_PASSWORD: root_test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_test_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      TECHNEXUS_MYSQL_IT: 'true'
+      TECHNEXUS_DB_URL: jdbc:mysql://127.0.0.1:3306/technexus_it?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      TECHNEXUS_DB_USER: tn_app
+      TECHNEXUS_DB_PASSWORD: tn_test_password
+      TECHNEXUS_JWT_SECRET: ci-secret-that-is-at-least-thirty-two-bytes-long
+      TECHNEXUS_STORAGE_ACCESS_KEY: ci-access-key
+      TECHNEXUS_STORAGE_SECRET_KEY: ci-secret-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify backend and MySQL migrations
+        run: mvn --settings .mvn/settings.xml --no-transfer-progress clean install
+      - name: Enforce coverage gates
+        shell: pwsh
+        run: ./scripts/check-coverage.ps1
+
+  frontend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [technexus-web, technexus-admin]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.29.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
+        with:
+          scan-args: |-
+            --recursive
+            ./

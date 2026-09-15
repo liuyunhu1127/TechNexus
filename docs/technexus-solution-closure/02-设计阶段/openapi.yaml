@@ -1,0 +1,1302 @@
+openapi: 3.1.0
+info:
+  title: technexus-server API
+  version: 1.0.1
+  x-service-name: technexus-server
+  description: >-
+    TechNexus V1 user and administration contract. Demand is not an Order and
+    this contract does not expose payment, purchase, entitlement, video upload,
+    or instant-messaging capabilities.
+servers:
+  - url: /api/v1
+    description: Same-origin reverse-proxy base path
+tags:
+  - name: Auth
+  - name: Profile
+  - name: Content
+  - name: Demand
+  - name: Lineage
+  - name: File
+  - name: Search
+  - name: Notification
+  - name: Audit
+  - name: Pricing
+  - name: Operations
+  - name: AI
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerAccount
+      x-requirements: [FR-ACC-01]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterRequest'}
+      responses:
+        '201': {$ref: '#/components/responses/AccountCreated'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      x-requirements: [FR-ACC-01]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LoginRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/TokenPair'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      x-requirements: [FR-ACC-01, FR-ACC-03]
+      security:
+        - refreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200': {$ref: '#/components/responses/TokenPair'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      x-requirements: [FR-ACC-03]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204': {description: Session revoked}
+        '401': {$ref: '#/components/responses/Problem'}
+  /me:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      x-requirements: [FR-ACC-02]
+      responses:
+        '200':
+          description: Current profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileResponse'}
+        '401': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Profile]
+      operationId: updateMyProfile
+      x-requirements: [FR-ACC-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfilePatch'}
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /contents:
+    get:
+      tags: [Content]
+      operationId: listContents
+      x-requirements: [FR-CNT-01, FR-SCH-02, FR-RCM-01]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - name: type
+          in: query
+          schema: {$ref: '#/components/schemas/ContentType'}
+        - name: sort
+          in: query
+          schema: {type: string, enum: [relevance, latest, hottest]}
+      responses:
+        '200':
+          description: Visible content page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContentPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Content]
+      operationId: createContent
+      x-requirements: [FR-CNT-01, FR-CNT-02, FR-CNT-05]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContentWrite'}
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContentResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /contents/{contentId}:
+    parameters:
+      - $ref: '#/components/parameters/ContentId'
+    get:
+      tags: [Content]
+      operationId: getContent
+      x-requirements: [FR-CNT-01, FR-CNT-06]
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Visible published or authorized draft content
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContentResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Content]
+      operationId: updateContent
+      x-requirements: [FR-CNT-01, FR-CNT-06]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContentPatch'}
+      responses:
+        '200':
+          description: Draft/revision updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContentResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /contents/{contentId}/submit:
+    post:
+      tags: [Content]
+      operationId: submitContentForReview
+      x-requirements: [FR-CNT-06, FR-CNT-07, FR-AUD-01]
+      parameters:
+        - $ref: '#/components/parameters/ContentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExpectedVersionCommand'}
+      responses:
+        '202':
+          description: Content frozen and review task accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContentResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /contents/{contentId}/comments:
+    post:
+      tags: [Content]
+      operationId: createComment
+      x-requirements: [FR-CNT-03]
+      parameters:
+        - $ref: '#/components/parameters/ContentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommentWrite'}
+      responses:
+        '201':
+          description: Comment created or queued for review
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommentResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /contents/{contentId}/demands:
+    post:
+      tags: [Lineage, Demand]
+      operationId: createDemandFromContent
+      x-requirements: [FR-LOOP-01]
+      parameters:
+        - $ref: '#/components/parameters/ContentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DemandWrite'}
+      responses:
+        '201':
+          description: Demand draft and source lineage created atomically
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /demands:
+    get:
+      tags: [Demand]
+      operationId: listDemands
+      x-requirements: [FR-DMD-01, FR-DMD-07, FR-SCH-02]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - name: sort
+          in: query
+          schema: {type: string, enum: [relevance, latest, budget, deadline]}
+      responses:
+        '200':
+          description: Visibility-filtered demand page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Demand]
+      operationId: createDemand
+      x-requirements: [FR-DMD-01, FR-DMD-07]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DemandWrite'}
+      responses:
+        '201':
+          description: Demand draft created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /demands/{demandId}:
+    parameters:
+      - $ref: '#/components/parameters/DemandId'
+    get:
+      tags: [Demand]
+      operationId: getDemand
+      x-requirements: [FR-DMD-01, FR-DMD-07]
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Demand filtered to caller visibility
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Demand]
+      operationId: updateDemand
+      x-requirements: [FR-DMD-01, FR-DMD-06]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DemandPatch'}
+      responses:
+        '200':
+          description: Demand draft updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /demands/{demandId}/submit:
+    post:
+      tags: [Demand]
+      operationId: submitDemandForReview
+      x-requirements: [FR-DMD-02, FR-AUD-01]
+      parameters:
+        - $ref: '#/components/parameters/DemandId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExpectedVersionCommand'}
+      responses:
+        '202':
+          description: Review accepted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /demands/{demandId}/proposals:
+    post:
+      tags: [Demand]
+      operationId: createProposal
+      x-requirements: [FR-DMD-03, FR-DMD-07]
+      parameters:
+        - $ref: '#/components/parameters/DemandId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProposalWrite'}
+      responses:
+        '201':
+          description: Proposal submitted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProposalResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /demands/{demandId}/transitions:
+    post:
+      tags: [Demand]
+      operationId: transitionDemand
+      x-requirements: [FR-DMD-04, FR-DMD-06]
+      parameters:
+        - $ref: '#/components/parameters/DemandId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DemandTransition'}
+      responses:
+        '200':
+          description: Transition applied
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DemandResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /lineages/{targetType}/{targetId}:
+    get:
+      tags: [Lineage]
+      operationId: getLineage
+      x-requirements: [FR-LOOP-02, FR-LOOP-04]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: targetType
+          in: path
+          required: true
+          schema: {type: string, enum: [CONTENT, DEMAND, PROPOSAL]}
+        - name: targetId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Visibility-filtered lineage graph
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LineageResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /files/uploads:
+    post:
+      tags: [File]
+      operationId: createFileUpload
+      x-requirements: [FR-FILE-01, FR-FILE-02, FR-FILE-03]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FileUploadRequest'}
+      responses:
+        '201':
+          description: Fixed-key direct upload session
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileUploadResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /files/uploads/{uploadId}/complete:
+    post:
+      tags: [File]
+      operationId: completeFileUpload
+      x-requirements: [FR-FILE-03, FR-FILE-04]
+      parameters:
+        - $ref: '#/components/parameters/UploadId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Object HEAD validated and scan queued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /files/{fileId}/download-url:
+    post:
+      tags: [File]
+      operationId: createFileDownloadUrl
+      x-requirements: [FR-FILE-05, FR-FILE-06]
+      parameters:
+        - $ref: '#/components/parameters/FileId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Five-minute authorized download URL
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DownloadUrlResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /search:
+    get:
+      tags: [Search]
+      operationId: search
+      x-requirements: [FR-SCH-01, FR-SCH-02, FR-RCM-01]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 2, maxLength: 100}
+        - name: types
+          in: query
+          schema:
+            type: array
+            items: {type: string, enum: [CONTENT, DEMAND, USER, TAG]}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Public/authorized results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SearchPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /notifications:
+    get:
+      tags: [Notification]
+      operationId: listNotifications
+      x-requirements: [FR-MSG-01]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Current user's notifications
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPage'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notification]
+      operationId: readNotification
+      x-requirements: [FR-MSG-01]
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204': {description: Marked read or already read}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/audit-tasks:
+    get:
+      tags: [Audit]
+      operationId: listAuditTasks
+      x-requirements: [FR-AUD-01, FR-AIOPS-02]
+      parameters:
+        - name: state
+          in: query
+          schema: {$ref: '#/components/schemas/AuditState'}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Authorized audit queue
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditTaskPage'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/audit-tasks/{taskId}/decisions:
+    post:
+      tags: [Audit]
+      operationId: decideAuditTask
+      x-requirements: [FR-AUD-02, FR-AUD-03, FR-AUD-04, FR-AUD-05]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuditDecision'}
+      responses:
+        '200':
+          description: Human decision atomically recorded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditTaskResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/prices/{targetType}/{targetId}/confirmations:
+    post:
+      tags: [Pricing]
+      operationId: confirmPrice
+      x-requirements: [FR-PRC-01, FR-PRC-02, FR-PRC-03, FR-PRC-04, FR-PRC-05, FR-PRC-06]
+      parameters:
+        - name: targetType
+          in: path
+          required: true
+          schema: {type: string, enum: [DOCUMENT, ATTACHMENT, DEMAND, SERVICE]}
+        - name: targetId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ConfirmationToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PriceConfirmation'}
+      responses:
+        '200':
+          description: Current price and immutable history written
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PriceResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/dashboard:
+    get:
+      tags: [Operations]
+      operationId: getOperationsDashboard
+      x-requirements: [FR-AIOPS-03]
+      responses:
+        '200':
+          description: Audit, pricing, failed jobs, storage and backup summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/config/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z][a-z0-9_.-]{2,127}$'}
+    get:
+      tags: [Operations]
+      operationId: getConfig
+      x-requirements: [FR-CFG-01, FR-CFG-02]
+      responses:
+        '200':
+          description: Config without secret material
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Operations]
+      operationId: updateConfig
+      x-requirements: [FR-CFG-01, FR-CFG-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ConfirmationToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfigUpdate'}
+      responses:
+        '200':
+          description: Validated config version updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfigResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/ai-suggestions:
+    post:
+      tags: [AI]
+      operationId: createAiSuggestion
+      x-requirements: [FR-AIOPS-01, FR-AIOPS-04]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AiSuggestionRequest'}
+      responses:
+        '202':
+          description: Suggestion task accepted; never a business decision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AiSuggestionResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /admin/ai-suggestions/{suggestionId}/decisions:
+    post:
+      tags: [AI]
+      operationId: decideAiSuggestion
+      x-requirements: [FR-AIOPS-01, FR-AIOPS-04]
+      parameters:
+        - name: suggestionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AiSuggestionDecision'}
+      responses:
+        '200':
+          description: Human accept, edit or reject decision recorded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AiSuggestionResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: tn_refresh
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 128}
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: {type: string, minLength: 16, maxLength: 256}
+    ConfirmationToken:
+      name: X-Confirmation-Token
+      in: header
+      required: true
+      schema: {type: string, minLength: 16, maxLength: 512}
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string, maxLength: 1024}
+    PageSize:
+      name: pageSize
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+    ContentId:
+      name: contentId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    DemandId:
+      name: demandId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    UploadId:
+      name: uploadId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    Problem:
+      description: Request rejected
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    RateLimited:
+      description: Rate limited
+      headers:
+        Retry-After:
+          schema: {type: integer, minimum: 1}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    AccountCreated:
+      description: Account created
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ProfileResponse'}
+    TokenPair:
+      description: Access token returned; rotated refresh token is Secure HttpOnly cookie
+      headers:
+        Set-Cookie:
+          schema: {type: string}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/TokenResponse'}
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    Instant:
+      type: string
+      format: date-time
+    AccountStatus:
+      type: string
+      enum: [REGISTERED, ACTIVE, LOCKED, DISABLED, CANCELLED]
+    ContentType:
+      type: string
+      enum: [POST, DOCUMENT, PROBLEM, SOLUTION]
+    ContentState:
+      type: string
+      enum: [DRAFT, PENDING_REVIEW, WAITING_PRICING, PUBLISHED, REJECTED, OFFLINE, DELETED, BLOCKED]
+    DemandState:
+      type: string
+      enum: [DRAFT, PENDING_REVIEW, APPROVED, REJECTED, PUBLISHED, NEGOTIATING, CONFIRMED, IN_PROGRESS, DELIVERED, COMPLETED, EXPIRED, CANCELLED, OFFLINE]
+    AuditState:
+      type: string
+      enum: [CREATED, PENDING, PROCESSING, APPROVED, REJECTED, CANCELLED]
+    FileState:
+      type: string
+      enum: [UPLOADING, UPLOADED, SCANNING, AVAILABLE, BLOCKED, EXPIRED, DELETED]
+    Visibility:
+      type: string
+      enum: [PUBLIC, LOGIN_REQUIRED, PARTICIPANTS, OWNER_ONLY, ADMIN_ONLY]
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount: {type: string, pattern: '^\d{1,10}(\.\d{1,2})?$'}
+        currency: {type: string, const: CNY}
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        password: {type: string, minLength: 12, maxLength: 128}
+        displayName: {type: string, minLength: 1, maxLength: 80}
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [account, password]
+      properties:
+        account: {type: string, minLength: 3, maxLength: 254}
+        password: {type: string, minLength: 1, maxLength: 128}
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken: {type: string}
+        tokenType: {type: string, const: Bearer}
+        expiresIn: {type: integer, minimum: 1, example: 900}
+    Profile:
+      type: object
+      additionalProperties: false
+      required: [id, status, displayName, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        status: {$ref: '#/components/schemas/AccountStatus'}
+        displayName: {type: string, maxLength: 80}
+        bio: {type: string, maxLength: 1000}
+        version: {type: integer, minimum: 0}
+    ProfilePatch:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        displayName: {type: string, minLength: 1, maxLength: 80}
+        bio: {type: string, maxLength: 1000}
+        expectedVersion: {type: integer, minimum: 0}
+    ProfileResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/Profile'}
+    Content:
+      type: object
+      additionalProperties: false
+      required: [id, type, state, visibility, title, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        type: {$ref: '#/components/schemas/ContentType'}
+        state: {$ref: '#/components/schemas/ContentState'}
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        title: {type: string, maxLength: 160}
+        summary: {type: string, maxLength: 500}
+        body: {type: string, maxLength: 200000}
+        auditTaskId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+          description: Present only when a review submission has been accepted.
+        tagIds:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+        fileIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+        publishedAt: {$ref: '#/components/schemas/Instant'}
+        version: {type: integer, minimum: 0}
+    ContentWrite:
+      type: object
+      additionalProperties: false
+      required: [type, visibility, title, body]
+      properties:
+        type: {$ref: '#/components/schemas/ContentType'}
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        title: {type: string, minLength: 1, maxLength: 160}
+        summary: {type: string, maxLength: 500}
+        body: {type: string, minLength: 1, maxLength: 200000}
+        tagIds:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+        fileIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+    ContentPatch:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        title: {type: string, minLength: 1, maxLength: 160}
+        summary: {type: string, maxLength: 500}
+        body: {type: string, minLength: 1, maxLength: 200000}
+        tagIds:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+        fileIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Uuid'}
+        expectedVersion: {type: integer, minimum: 0}
+    ContentResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/Content'}
+    ContentPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Content'}}
+        nextCursor: {type: [string, 'null']}
+    ExpectedVersionCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: {type: integer, minimum: 0}
+    CommentWrite:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: {type: string, minLength: 1, maxLength: 5000}
+        parentId: {oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]}
+    CommentResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, body, state, createdAt]
+          properties:
+            id: {$ref: '#/components/schemas/Uuid'}
+            body: {type: string}
+            state: {type: string, enum: [PENDING_REVIEW, PUBLISHED, REJECTED, DELETED, BLOCKED]}
+            createdAt: {$ref: '#/components/schemas/Instant'}
+    Demand:
+      type: object
+      additionalProperties: false
+      required: [id, state, title, description, visibility, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        state: {$ref: '#/components/schemas/DemandState'}
+        title: {type: string, maxLength: 160}
+        description: {type: string, maxLength: 50000}
+        technicalRequirements: {type: array, items: {type: string, maxLength: 500}, maxItems: 30}
+        budgetMin: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        budgetMax: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        platformQuote: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        finalQuote: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        deadlineAt: {oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        version: {type: integer, minimum: 0}
+        auditTaskId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+          description: Present only when a review submission has been accepted.
+    DemandWrite:
+      type: object
+      additionalProperties: false
+      required: [title, description, visibility]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 160}
+        description: {type: string, minLength: 1, maxLength: 50000}
+        technicalRequirements: {type: array, items: {type: string, maxLength: 500}, maxItems: 30}
+        budgetMin: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        budgetMax: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        deadlineAt: {oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        contact: {type: string, maxLength: 1000, writeOnly: true}
+        fileIds: {type: array, maxItems: 20, uniqueItems: true, items: {$ref: '#/components/schemas/Uuid'}}
+    DemandPatch:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 160}
+        description: {type: string, minLength: 1, maxLength: 50000}
+        technicalRequirements: {type: array, items: {type: string, maxLength: 500}, maxItems: 30}
+        budgetMin: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        budgetMax: {oneOf: [{$ref: '#/components/schemas/Money'}, {type: 'null'}]}
+        deadlineAt: {oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+        visibility: {$ref: '#/components/schemas/Visibility'}
+        contact: {type: [string, 'null'], maxLength: 1000, writeOnly: true}
+        fileIds: {type: array, maxItems: 20, uniqueItems: true, items: {$ref: '#/components/schemas/Uuid'}}
+        expectedVersion: {type: integer, minimum: 0}
+    DemandResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/Demand'}
+    DemandPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Demand'}}
+        nextCursor: {type: [string, 'null']}
+    ProposalWrite:
+      type: object
+      additionalProperties: false
+      required: [plan, techStack, estimatedDays, suggestedQuote]
+      properties:
+        plan: {type: string, minLength: 1, maxLength: 50000}
+        techStack: {type: array, minItems: 1, maxItems: 30, items: {type: string, maxLength: 80}}
+        estimatedDays: {type: integer, minimum: 1, maximum: 3650}
+        suggestedQuote: {$ref: '#/components/schemas/Money'}
+    ProposalResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, demandId, state, estimatedDays, suggestedQuote, version]
+          properties:
+            id: {$ref: '#/components/schemas/Uuid'}
+            demandId: {$ref: '#/components/schemas/Uuid'}
+            state: {type: string, enum: [SUBMITTED, WITHDRAWN, ACCEPTED, REJECTED]}
+            estimatedDays: {type: integer}
+            suggestedQuote: {$ref: '#/components/schemas/Money'}
+            version: {type: integer, minimum: 0}
+    DemandTransition:
+      type: object
+      additionalProperties: false
+      required: [action, expectedVersion]
+      properties:
+        action:
+          type: string
+          enum: [START_NEGOTIATION, CONFIRM_PROPOSAL, START_WORK, DELIVER, COMPLETE, CANCEL, OFFLINE]
+        proposalId: {oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]}
+        reason: {type: string, maxLength: 1000}
+        expectedVersion: {type: integer, minimum: 0}
+    LineageResponse:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [type, id, label]
+            properties:
+              type: {type: string, enum: [CONTENT, DEMAND, PROPOSAL]}
+              id: {$ref: '#/components/schemas/Uuid'}
+              label: {type: string, maxLength: 160}
+        edges:
+          type: array
+          items:
+            type: object
+            required: [sourceId, targetId, type]
+            properties:
+              sourceId: {$ref: '#/components/schemas/Uuid'}
+              targetId: {$ref: '#/components/schemas/Uuid'}
+              type: {type: string, enum: [PROBLEM_TO_DEMAND, DEMAND_TO_PROPOSAL, DEMAND_TO_SOLUTION, SOLUTION_TO_KNOWLEDGE]}
+    FileUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [fileName, sizeBytes, declaredMime, sha256, purpose]
+      properties:
+        fileName: {type: string, minLength: 1, maxLength: 255}
+        sizeBytes: {type: integer, minimum: 1, maximum: 104857600}
+        declaredMime: {type: string, maxLength: 127}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        purpose: {type: string, enum: [IMAGE, ATTACHMENT]}
+    FileUploadResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [uploadId, fileId, state, uploadUrl, expiresAt]
+          properties:
+            uploadId: {$ref: '#/components/schemas/Uuid'}
+            fileId: {$ref: '#/components/schemas/Uuid'}
+            state: {$ref: '#/components/schemas/FileState'}
+            uploadUrl: {type: string, format: uri}
+            expiresAt: {$ref: '#/components/schemas/Instant'}
+    FileResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, state]
+          properties:
+            id: {$ref: '#/components/schemas/Uuid'}
+            state: {$ref: '#/components/schemas/FileState'}
+    DownloadUrlResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [url, expiresAt]
+          properties:
+            url: {type: string, format: uri}
+            expiresAt: {$ref: '#/components/schemas/Instant'}
+    SearchPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [type, id, title]
+            properties:
+              type: {type: string, enum: [CONTENT, DEMAND, USER, TAG]}
+              id: {$ref: '#/components/schemas/Uuid'}
+              title: {type: string}
+              snippet: {type: string}
+        nextCursor: {type: [string, 'null']}
+    NotificationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, type, title, createdAt]
+            properties:
+              id: {$ref: '#/components/schemas/Uuid'}
+              type: {type: string, enum: [SYSTEM, AUDIT, COMMENT, REPLY, DEMAND]}
+              title: {type: string}
+              readAt: {oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+              createdAt: {$ref: '#/components/schemas/Instant'}
+        nextCursor: {type: [string, 'null']}
+    AuditDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, reasonCode, expectedTaskVersion]
+      properties:
+        decision: {type: string, enum: [APPROVED, REJECTED]}
+        reasonCode: {type: string, enum: [ILLEGAL, ADVERTISING, COPYRIGHT, SENSITIVE, FILE_RISK, LOW_QUALITY, INCOMPLETE, INVALID_PRICE, OTHER]}
+        note: {type: string, maxLength: 2000}
+        expectedTaskVersion: {type: integer, minimum: 0}
+        suggestionId: {oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]}
+    AuditTask:
+      type: object
+      required: [id, targetType, targetId, targetVersionId, state, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        targetType: {type: string}
+        targetId: {$ref: '#/components/schemas/Uuid'}
+        targetVersionId: {$ref: '#/components/schemas/Uuid'}
+        state: {$ref: '#/components/schemas/AuditState'}
+        version: {type: integer, minimum: 0}
+    AuditTaskResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/AuditTask'}
+    AuditTaskPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AuditTask'}}
+        nextCursor: {type: [string, 'null']}
+    PriceConfirmation:
+      type: object
+      additionalProperties: false
+      required: [mode, amount, validFrom, reason, expectedVersion]
+      properties:
+        mode: {type: string, enum: [FREE, PAID, PREVIEW, ATTACHMENT_PAID]}
+        amount: {$ref: '#/components/schemas/Money'}
+        validFrom: {$ref: '#/components/schemas/Instant'}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+        expectedVersion: {type: integer, minimum: 0}
+    PriceResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [targetType, targetId, mode, amount, validFrom, version]
+          properties:
+            targetType: {type: string}
+            targetId: {$ref: '#/components/schemas/Uuid'}
+            mode: {type: string, enum: [FREE, PAID, PREVIEW, ATTACHMENT_PAID]}
+            amount: {$ref: '#/components/schemas/Money'}
+            validFrom: {$ref: '#/components/schemas/Instant'}
+            version: {type: integer, minimum: 0}
+    DashboardResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [pendingAudit, pendingPricing, failedJobs, storageAlert, backupAlert]
+          properties:
+            pendingAudit: {type: integer, minimum: 0}
+            pendingPricing: {type: integer, minimum: 0}
+            failedJobs: {type: integer, minimum: 0}
+            storageAlert: {type: boolean}
+            backupAlert: {type: boolean}
+    ConfigUpdate:
+      type: object
+      additionalProperties: false
+      required: [value, expectedVersion, reason]
+      properties:
+        value: {}
+        expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    ConfigResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [key, value, version]
+          properties:
+            key: {type: string}
+            value: {}
+            version: {type: integer, minimum: 0}
+    AiSuggestionRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, targetType, targetId, targetVersionId]
+      properties:
+        kind: {type: string, enum: [TAGS, SUMMARY, CATEGORY, DEMAND_STRUCTURE, AUDIT_REASON]}
+        targetType: {type: string, enum: [CONTENT, DEMAND, AUDIT_TASK]}
+        targetId: {$ref: '#/components/schemas/Uuid'}
+        targetVersionId: {$ref: '#/components/schemas/Uuid'}
+    AiSuggestionDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, expectedVersion]
+      properties:
+        decision: {type: string, enum: [ACCEPT, EDIT, REJECT]}
+        editedOutput: {type: [object, 'null']}
+        expectedVersion: {type: integer, minimum: 0}
+    AiSuggestionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, kind, state, isSuggestion, version]
+          properties:
+            id: {$ref: '#/components/schemas/Uuid'}
+            kind: {type: string}
+            state: {type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, ACCEPTED, EDITED, REJECTED]}
+            isSuggestion: {type: boolean, const: true}
+            output: {type: [object, 'null']}
+            version: {type: integer, minimum: 0}
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, traceId]
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        code: {type: string, pattern: '^[A-Z][A-Z0-9_]+$'}
+        detail: {type: string}
+        traceId: {type: string}
+        violations:
+          type: array
+          items:
+            type: object
+            required: [field, code]
+            properties:
+              field: {type: string}
+              code: {type: string}
+              message: {type: string}
