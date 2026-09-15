@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated build outputs are excluded; source and lock files remain scanned."
+paths = [
+  '''(^|/)(target|node_modules|\.nuxt|\.output|dist)/''',
+]

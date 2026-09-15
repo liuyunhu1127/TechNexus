@@ -1,0 +1,5 @@
+# Normalize text files
+* text=auto
+
+# Markdown allows two trailing spaces as an explicit hard line break.
+*.md text eol=lf whitespace=-blank-at-eol

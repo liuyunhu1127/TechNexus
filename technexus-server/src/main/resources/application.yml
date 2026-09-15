@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: technexus-server
+  datasource:
+    url: ${TECHNEXUS_DB_URL:jdbc:mysql://localhost:3306/technexus?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${TECHNEXUS_DB_USER:tn_app}
+    password: ${TECHNEXUS_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 1
+      connection-timeout: 3000
+      connection-init-sql: SET time_zone = '+00:00'
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+    clean-disabled: true
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: UTC
+
+server:
+  shutdown: graceful
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+technexus:
+  security:
+    jwt-secret: ${TECHNEXUS_JWT_SECRET}
+    bootstrap-admin-email: ${TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL:}
+    allowed-origins: ${TECHNEXUS_ALLOWED_ORIGINS:http://localhost:3000}
+  storage:
+    endpoint: ${TECHNEXUS_STORAGE_ENDPOINT:http://localhost:9000}
+    bucket: ${TECHNEXUS_STORAGE_BUCKET:technexus-files}
+    region: ${TECHNEXUS_STORAGE_REGION:us-east-1}
+    access-key: ${TECHNEXUS_STORAGE_ACCESS_KEY}
+    secret-key: ${TECHNEXUS_STORAGE_SECRET_KEY}
+  file:
+    scan:
+      host: ${TECHNEXUS_CLAMAV_HOST:localhost}
+      port: ${TECHNEXUS_CLAMAV_PORT:3310}
+      timeout-ms: ${TECHNEXUS_CLAMAV_TIMEOUT_MS:30000}
+      poll-ms: ${TECHNEXUS_FILE_SCAN_POLL_MS:5000}
+  ai:
+    enabled: ${TECHNEXUS_AI_ENABLED:false}
+    base-url: ${TECHNEXUS_AI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${TECHNEXUS_AI_API_KEY:}
+    model: ${TECHNEXUS_AI_MODEL:gpt-5-mini}
+    poll-ms: ${TECHNEXUS_AI_POLL_MS:5000}

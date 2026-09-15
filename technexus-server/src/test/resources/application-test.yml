@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:technexus;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+  flyway:
+    enabled: false
+
+technexus:
+  security:
+    jwt-secret: test-secret-that-is-at-least-thirty-two-bytes-long
+    bootstrap-admin-email: admin@example.com
