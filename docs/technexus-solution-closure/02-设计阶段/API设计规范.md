@@ -1,7 +1,7 @@
 # TechNexus V1 API 设计规范
 
 文档编号：`DES-API-001`  
-版本：`v1.0.1`  
+版本：`v1.0.2`  
 状态：`已基线化`  
 API 负责人：`技术负责人`  
 OpenAPI 版本：`3.1.0`  
@@ -223,3 +223,4 @@ HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模�
 | 全部 | v0.2 | 服务、消费者和接口所有权统一为指定 `technexus-*` 工程及 `com.technexus.*` 包名 | 兼容 | DES-USER-002 |
 | 全部 | v1.0 | 用户通过第 3 轮设计门禁，无修改基线化 | 兼容 | 阶段通过 |
 | 提交审核响应 | v1.0.1 | 按 6.1 已批准语义，将可选 `auditTaskId` 补入 Content/Demand 机器 Schema | 向后兼容勘误 | DEV-ISSUE-010 |
+| 文件上传完成 | v1.0.2 | 补列对象存储不可用时的 `503 Problem`，与依赖故障规范一致 | 向后兼容勘误 | TST-DEFECT-003 |

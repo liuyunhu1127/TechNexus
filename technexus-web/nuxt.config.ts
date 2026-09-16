@@ -1,3 +1,7 @@
+declare const process: { env: { TECHNEXUS_API_PROXY_TARGET?: string } }
+
+const apiProxyTarget = process.env.TECHNEXUS_API_PROXY_TARGET ?? 'http://localhost:8080/api/**'
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-01-15',
   devtools: { enabled: false },
@@ -6,6 +10,9 @@ export default defineNuxtConfig({
     public: {
       apiBase: '/api/v1'
     }
+  },
+  routeRules: {
+    '/api/**': { proxy: apiProxyTarget }
   },
   app: {
     head: {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: technexus-server API
-  version: 1.0.1
+  version: 1.0.2
   x-service-name: technexus-server
   description: >-
     TechNexus V1 user and administration contract. Demand is not an Order and
@@ -464,6 +464,7 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
   /files/{fileId}/download-url:
     post:
       tags: [File]

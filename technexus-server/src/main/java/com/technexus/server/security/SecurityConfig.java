@@ -1,7 +1,9 @@
 package com.technexus.server.security;
 
 import com.technexus.server.web.idempotency.IdempotencyFilter;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,22 +25,32 @@ public class SecurityConfig {
 			throws Exception {
 		var configured = http.csrf(csrf -> csrf.disable())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-				.authorizeHttpRequests(auth -> auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+				.authorizeHttpRequests(auth -> auth.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.requestMatchers("/actuator/health", "/api/v1/auth/**").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/v1/contents/**", "/api/v1/demands/**", "/api/v1/search")
 						.permitAll().requestMatchers("/api/v1/admin/**")
 						.hasAnyAuthority("SCOPE_admin", "SCOPE_operations").anyRequest().authenticated())
 				.exceptionHandling(errors -> errors
-						.authenticationEntryPoint(
-								(request, response, error) -> response.sendError(HttpServletResponse.SC_UNAUTHORIZED))
-						.accessDeniedHandler(
-								(request, response, error) -> response.sendError(HttpServletResponse.SC_FORBIDDEN)))
+						.authenticationEntryPoint((request, response, error) -> writeProblem(response,
+								HttpServletResponse.SC_UNAUTHORIZED, "AUTH_REQUIRED", "需要登录"))
+						.accessDeniedHandler((request, response, error) -> writeProblem(response,
+								HttpServletResponse.SC_FORBIDDEN, "ACCESS_DENIED", "没有操作权限")))
 				.addFilterBefore(cookieMutationGuard, UsernamePasswordAuthenticationFilter.class)
 				.addFilterBefore(bearerFilter, UsernamePasswordAuthenticationFilter.class);
 		var idempotencyFilter = idempotencyFilters.getIfAvailable();
 		if (idempotencyFilter != null)
 			configured.addFilterAfter(idempotencyFilter, BearerAuthenticationFilter.class);
 		return configured.build();
+	}
+
+	private static void writeProblem(HttpServletResponse response, int status, String code, String title)
+			throws IOException {
+		response.setStatus(status);
+		response.setContentType("application/problem+json;charset=UTF-8");
+		response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
+				+ ",\"code\":\"" + code + "\"}");
+		response.flushBuffer();
 	}
 
 	@Bean
