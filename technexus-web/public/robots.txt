@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+Disallow: /contents/new
+Disallow: /demands/new
+Disallow: /files/

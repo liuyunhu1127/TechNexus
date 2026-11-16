@@ -7,13 +7,18 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "typecheck": "nuxt typecheck",
-    "lint": "eslint . --max-warnings 0"
+    "lint": "eslint . --max-warnings 0",
+    "test:ui-smoke": "node scripts/user-core-ui-smoke.mjs",
+    "test:quality-smoke": "node scripts/quality-ui-smoke.mjs"
   },
   "dependencies": {
-    "nuxt": "3.21.11",
-    "vue": "3.5.42"
+    "is-mergeable-object": "1.1.0",
+    "nuxt": "4.6.3",
+    "vue": "3.5.44"
   },
   "devDependencies": {
+    "@nuxt/nitro-server": "4.6.3",
+    "@nuxt/vite-builder": "4.6.3",
     "@eslint/js": "^9.39.4",
     "eslint": "^9.39.4",
     "eslint-plugin-vue": "^10.4.0",
@@ -22,6 +27,21 @@
     "vue-tsc": "3.2.5"
   },
   "overrides": {
-    "glob": "13.0.6"
+    "glob": "13.0.6",
+    "@nuxt/devtools": "3.4.4",
+    "brace-expansion@^2.0.0": "2.1.7",
+    "brace-expansion@^5.0.0": "5.0.12",
+    "deepmerge": "git+https://github.com/TehShrike/deepmerge.git#c5ad573121574db1c625b0aabcc6114ed7df6c5a",
+    "devalue": "5.9.4",
+    "launch-editor": "2.14.2",
+    "node-forge": "1.4.2",
+    "postcss-selector-parser": "6.1.5",
+    "serialize-javascript": "7.1.4",
+    "shell-quote": "1.12.0",
+    "source-map-js": "1.2.2",
+    "vite": "8.3.5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

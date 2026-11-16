@@ -84,8 +84,8 @@ class ApiContractSurfaceTest {
 					assertJsonSchema(document, operation.get("requestBody"), key + " requestBody");
 			});
 		});
-		assertEquals(29, paths.size());
-		assertEquals(35, operationIds.size());
+		assertEquals(44, paths.size());
+		assertEquals(56, operationIds.size());
 		return new Contract(successStatuses);
 	}
 

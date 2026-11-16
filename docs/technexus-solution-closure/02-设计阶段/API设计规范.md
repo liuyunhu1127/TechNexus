@@ -1,7 +1,7 @@
 # TechNexus V1 API 设计规范
 
 文档编号：`DES-API-001`  
-版本：`v1.0.2`  
+版本：`v1.0.10`  
 状态：`已基线化`  
 API 负责人：`技术负责人`  
 OpenAPI 版本：`3.1.0`  
@@ -28,7 +28,8 @@ OpenAPI 版本：`3.1.0`
 | `/search`、`/notifications` | `technexus-community` | `com.technexus.community` |
 | `/admin/audit-tasks` | `technexus-audit` | `com.technexus.audit` |
 | `/admin/prices` | `technexus-pricing` | `com.technexus.pricing` |
-| `/admin/config`、`/admin/dashboard`、`/admin/ai-suggestions` | `technexus-server` 子包 | `com.technexus.server.config`、`com.technexus.server.operations`、`com.technexus.server.ai` |
+| `/admin/tags` | `technexus-community` | `com.technexus.community` |
+| `/admin/config`、`/admin/feature-flags`、`/admin/dashboard`、`/admin/operation-audits`、`/admin/ai-suggestions` | `technexus-server` 子包 | `com.technexus.server.admin` |
 
 HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模块公开 `api`；不得另建用户图片清单之外的同级工程。
 
@@ -87,6 +88,8 @@ HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模�
 | API-FILE-001 | POST | `/files/uploads` | 创建直传会话 | user | 键 | FR-FILE-01/02 |
 | API-FILE-002 | POST | `/files/uploads/{uploadId}/complete` | 完成并触发扫描 | owner | 键 | FR-FILE-03 |
 | API-FILE-003 | POST | `/files/{fileId}/download-url` | 获取短期下载 URL | relation policy | 键 | FR-FILE-05/06 |
+| API-FILE-004 | GET | `/files/{fileId}` | 查询当前用户文件扫描状态 | owner | 否 | FR-FILE-03/05 |
+| API-TAG-001 | GET | `/tags` | 获取可选且未合并标签 | public | 否 | FR-CNT-05 |
 | API-SCH-001 | GET | `/search` | 跨域公开搜索 | public | 否 | FR-SCH-01/02、RCM-01 |
 | API-MSG-001 | GET | `/notifications` | 通知列表 | user:self | 否 | FR-MSG-01 |
 | API-MSG-002 | POST | `/notifications/{notificationId}/read` | 标记已读 | user:self | 键 | FR-MSG-01 |
@@ -95,6 +98,8 @@ HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模�
 | API-PRC-001 | POST | `/admin/prices/{targetType}/{targetId}/confirmations` | 确认价格 | pricing:manage | 键+确认令牌 | FR-PRC-01~06 |
 | API-OPS-001 | GET | `/admin/dashboard` | 核心待办摘要 | operations | 否 | FR-AIOPS-03 |
 | API-OPS-002 | GET/PUT | `/admin/config/{key}` | 参数读取/更新 | config:manage | PUT 键+确认令牌 | FR-CFG-01/02 |
+| API-OPS-003 | GET | `/admin/feature-flags` | Feature Flag 列表 | config:manage | 否 | FR-CFG-02 |
+| API-OPS-004 | GET/PUT | `/admin/feature-flags/{key}` | Flag 详情/版本化更新 | config:manage | PUT 键 | FR-CFG-02 |
 | API-AI-001 | POST | `/admin/ai-suggestions` | 创建建议任务 | operations | 键 | FR-AIOPS-01/04 |
 | API-AI-002 | POST | `/admin/ai-suggestions/{suggestionId}/decisions` | 采纳/编辑/拒绝 | operations | 键+版本 | FR-AIOPS-01/04 |
 
@@ -129,6 +134,8 @@ HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模�
 1. 创建：提交文件名、大小、声明 MIME、SHA-256、用途；服务校验上限并生成固定 Key/15 分钟上传 URL。
 2. 完成：只接受会话 ID，服务端 HEAD 后进入 SCANNING；客户端不可直接设 AVAILABLE。
 3. 下载：提交 relation 对应的 fileId，服务端重新校验主体、业务可见性和 AVAILABLE，返回 5 分钟 URL；不返回 objectKey。
+
+同 `SHA-256 + size` 命中已有对象时仍返回一次隔离 `proofs/` 上传 URL。完成接口校验实际对象摘要、大小和 MIME 后才为当前用户创建独立关系，并删除 proof 对象；仅知道摘要不得获得下载权限。该行为不改变现有请求/响应 Schema。
 
 ### 6.5 API-PRC-001 最终定价
 
@@ -224,3 +231,11 @@ HTTP 控制器由 `technexus-server` 装配，但业务操作委派给上述模�
 | 全部 | v1.0 | 用户通过第 3 轮设计门禁，无修改基线化 | 兼容 | 阶段通过 |
 | 提交审核响应 | v1.0.1 | 按 6.1 已批准语义，将可选 `auditTaskId` 补入 Content/Demand 机器 Schema | 向后兼容勘误 | DEV-ISSUE-010 |
 | 文件上传完成 | v1.0.2 | 补列对象存储不可用时的 `503 Problem`，与依赖故障规范一致 | 向后兼容勘误 | TST-DEFECT-003 |
+| 文件上传/完成 | v1.0.3 | 明确同 Hash 复用前必须完成隔离持有证明，授权关系在校验后创建 | 向后兼容语义澄清 | TST-RISK-001 |
+| 内容标签/附件 | v1.0.4 | 增加标签列表、文件状态读取，并把 `tagIds/fileIds` 纳入内容创建、更新和返回；公开已发布内容的附件允许已登录用户下载 | 向后兼容增量 | TNX-FUNC-001 |
+| Feature Flag | v1.0.5 | 增加独立 Feature Flag 列表、详情和版本化更新，灰度规则使用 JSON 并写操作审计 | 向后兼容增量 | TNX-FUNC-002 |
+| AI 建议/操作审计 | v1.0.6 | 增加 AI 建议任务列表与状态过滤、特权操作审计列表与动作过滤；查询最多返回 100 条 | 向后兼容增量 | TNX-FUNC-002 |
+| 标签运营 | v1.0.7 | 增加标准标签创建、启停、别名维护和合并；合并迁移内容关系并使用双版本乐观锁 | 向后兼容增量 | TNX-FUNC-002 |
+| 分类/推荐配置 | v1.0.8 | 增加强类型分类和运营置顶配置；首页核心分类强制 2–3 个，置顶目标和排序唯一，均使用版本锁与操作审计 | 向后兼容增量 | TNX-FUNC-002 |
+| 批量任务结果 | v1.0.9 | 增加标签启停批处理、批次列表和逐项结果；每项独立提交，版本冲突不回滚其他成功项 | 向后兼容增量 | TNX-FUNC-002 |
+| 业务闭环验证 | v1.0.10 | 增加评论列表/软删除占位、解决方案与知识来源参数、跨域搜索分页排序、运营推荐读取；Feature Flag 开始约束注册/评论/AI 实际入口 | 向后兼容增量 | TNX-VAL-001 |

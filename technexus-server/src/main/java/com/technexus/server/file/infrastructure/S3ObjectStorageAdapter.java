@@ -126,6 +126,46 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 		return new PresignedDownload(presign("GET", key, 300, Map.of()), clock.instant().plusSeconds(300));
 	}
 
+	@Override
+	public void quarantine(String sourceKey, String quarantineKey) {
+		var copySource = "/" + encode(bucket) + "/" + encodeKey(sourceKey);
+		try {
+			var request = HttpRequest
+					.newBuilder(presign("PUT", quarantineKey, 60, Map.of("x-amz-copy-source", copySource)))
+					.timeout(Duration.ofSeconds(30)).header("x-amz-copy-source", copySource)
+					.PUT(HttpRequest.BodyPublishers.noBody()).build();
+			var response = http.send(request, HttpResponse.BodyHandlers.discarding());
+			if (response.statusCode() / 100 != 2)
+				throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "无法隔离恶意文件");
+			delete(sourceKey);
+		} catch (DomainException error) {
+			throw error;
+		} catch (InterruptedException error) {
+			Thread.currentThread().interrupt();
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
+		} catch (Exception error) {
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
+		}
+	}
+
+	@Override
+	public void delete(String key) {
+		try {
+			var request = HttpRequest.newBuilder(presign("DELETE", key, 60, Map.of())).timeout(Duration.ofSeconds(10))
+					.DELETE().build();
+			var response = http.send(request, HttpResponse.BodyHandlers.discarding());
+			if (response.statusCode() / 100 != 2 && response.statusCode() != 404)
+				throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
+		} catch (DomainException error) {
+			throw error;
+		} catch (InterruptedException error) {
+			Thread.currentThread().interrupt();
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
+		} catch (Exception error) {
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
+		}
+	}
+
 	private URI presign(String method, String key, int expires, Map<String, String> requiredHeaders) {
 		try {
 			var now = clock.instant();

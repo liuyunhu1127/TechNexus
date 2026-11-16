@@ -13,8 +13,13 @@ import com.technexus.server.auth.JdbcLoginRateLimiter;
 import com.technexus.server.auth.application.port.AuthAccountStore.RotationStatus;
 import com.technexus.server.auth.infrastructure.JdbcAuthAccountStore;
 import com.technexus.server.admin.application.AdminApplicationService;
+import com.technexus.server.admin.application.BatchApplicationService;
+import com.technexus.server.admin.application.FeatureFlagEvaluator;
 import com.technexus.server.admin.application.port.OperationsRepository;
 import com.technexus.server.content.application.ContentApplicationService;
+import com.technexus.server.community.application.CommunityApplicationService;
+import com.technexus.server.community.application.DiscoveryApplicationService;
+import com.technexus.server.community.application.SearchApplicationService;
 import com.technexus.server.demand.application.DemandApplicationService;
 import com.technexus.server.file.application.port.FileRecordPort;
 import com.technexus.server.web.idempotency.IdempotencyStore.State;
@@ -39,7 +44,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @SpringBootTest(properties = {"technexus.security.jwt-secret=integration-secret-that-is-at-least-thirty-two-bytes-long",
-		"technexus.storage.access-key=integration-access", "technexus.storage.secret-key=integration-secret"})
+		"technexus.storage.access-key=integration-access", "technexus.storage.secret-key=integration-secret",
+		"technexus.file.workers-enabled=false"})
 @EnabledIfEnvironmentVariable(named = "TECHNEXUS_MYSQL_IT", matches = "true")
 class MySqlPersistenceIntegrationTest {
 	@Autowired
@@ -51,9 +57,19 @@ class MySqlPersistenceIntegrationTest {
 	@Autowired
 	private ContentApplicationService contents;
 	@Autowired
+	private CommunityApplicationService community;
+	@Autowired
+	private SearchApplicationService search;
+	@Autowired
+	private DiscoveryApplicationService discovery;
+	@Autowired
+	private FeatureFlagEvaluator featureFlags;
+	@Autowired
 	private DemandApplicationService demands;
 	@Autowired
 	private AdminApplicationService admin;
+	@Autowired
+	private BatchApplicationService batches;
 	@Autowired
 	private AuditTaskRepository audits;
 	@Autowired
@@ -68,14 +84,12 @@ class MySqlPersistenceIntegrationTest {
 	@Test
 	void appliesAllMigrationsOnMySql84() {
 		var current = flyway.info().current();
-		assertEquals("11", current.getVersion().getVersion());
-		var count = jdbc.queryForObject(
-				"""
-						SELECT COUNT(*) FROM information_schema.tables
-						WHERE table_schema=DATABASE() AND table_name IN
-						('tn_user','tn_auth_session','tn_article','tn_demand','tn_audit_task','tn_ai_suggestion','tn_rate_limit')
-						""",
-				Integer.class);
+		assertEquals("14", current.getVersion().getVersion());
+		var count = jdbc.queryForObject("""
+				SELECT COUNT(*) FROM information_schema.tables
+				WHERE table_schema=DATABASE() AND table_name IN
+				('tn_user','tn_auth_session','tn_article','tn_demand','tn_audit_task','tn_ai_suggestion','tn_tag_alias')
+				""", Integer.class);
 		assertEquals(7, count);
 	}
 
@@ -126,6 +140,18 @@ class MySqlPersistenceIntegrationTest {
 		admin.decideAuditTask(postTask.publicId(), reviewer,
 				new AdminApplicationService.AuditDecisionCommand("APPROVED", "QUALITY_OK", null, postTask.version()));
 		assertEquals("PUBLISHED", contents.get(post.id(), null).state());
+		var rootComment = community.createComment(provider, post.id(), null, "Root comment");
+		var commentNotice = community.listNotifications(owner).getFirst();
+		assertEquals("COMMENT", commentNotice.type());
+		var reply = community.createComment(owner, post.id(), rootComment.id(), "Child reply");
+		assertEquals("REPLY", community.listNotifications(provider).getFirst().type());
+		community.deleteComment(provider, post.id(), rootComment.id(), rootComment.version());
+		var thread = community.listComments(post.id());
+		assertEquals("DELETED", thread.getFirst().state());
+		assertEquals(rootComment.id(),
+				thread.stream().filter(item -> item.id().equals(reply.id())).findFirst().orElseThrow().parentId());
+		community.readNotification(owner, commentNotice.id());
+		assertNotNull(community.listNotifications(owner).getFirst().readAt());
 
 		var demand = demands.createFromContent(post.id(), owner,
 				new DemandApplicationService.DemandCommand("Need help", "Build it", new BigDecimal("10.00"),
@@ -141,6 +167,19 @@ class MySqlPersistenceIntegrationTest {
 
 		var proposal = demands.createProposal(demand.id(), provider, new DemandApplicationService.ProposalCommand(
 				"Implementation", List.of("Java", "Vue"), 7, new BigDecimal("15.00")));
+		var solution = contents.create(provider, new ContentApplicationService.ContentCommand("SOLUTION", "PUBLIC",
+				"Demand solution", null, "Solution"));
+		var knowledge = contents.create(provider, new ContentApplicationService.ContentCommand("DOCUMENT", "PUBLIC",
+				"Distilled knowledge", "Lineage", "Knowledge"));
+		demands.linkSolution(demand.id(), solution.id());
+		demands.linkKnowledge(solution.id(), knowledge.id());
+		assertEquals(5, demands.getLineage("CONTENT", post.id()).nodes().size());
+		assertEquals(4, demands.getLineage("CONTENT", post.id()).edges().size());
+		var contentSearch = search.search("Article", "CONTENT", "LATEST", 0, 1);
+		assertTrue(contentSearch.total() >= 1);
+		assertEquals(1, contentSearch.items().size());
+		var demandSearch = search.search("Need help", "DEMAND", "BUDGET", 0, 20);
+		assertTrue(demandSearch.items().stream().anyMatch(item -> item.id().equals(demand.id())));
 		var negotiating = demands.transition(demand.id(), owner, 3, "START_NEGOTIATION", null);
 		var confirmed = demands.transition(demand.id(), owner, negotiating.version(), "CONFIRM_PROPOSAL",
 				proposal.id());
@@ -153,6 +192,41 @@ class MySqlPersistenceIntegrationTest {
 				new AdminApplicationService.ConfigCommand(10, 0, "initialize"));
 		admin.updateConfig(configKey, reviewer,
 				new AdminApplicationService.ConfigCommand(12, config.version(), "adjust"));
+		var categoryConfig = admin.getCategoryConfig();
+		var savedCategoryConfig = admin.updateCategoryConfig(reviewer,
+				new AdminApplicationService.CategoryConfigCommand(categoryConfig.categories(), categoryConfig.version(),
+						"integration category config"));
+		assertEquals(categoryConfig.version() + 1, savedCategoryConfig.version());
+		var recommendationConfig = admin.getRecommendationConfig();
+		var recommendationTarget = article.id();
+		var savedRecommendationConfig = admin.updateRecommendationConfig(reviewer,
+				new AdminApplicationService.RecommendationConfigCommand(
+						List.of(new AdminApplicationService.RecommendationItem("CONTENT", recommendationTarget, 1)),
+						recommendationConfig.version(), "integration recommendation config"));
+		assertEquals(recommendationTarget, savedRecommendationConfig.items().getFirst().targetId());
+		assertEquals(recommendationTarget, discovery.recommendations(10).getFirst().targetId());
+		assertTrue(discovery.recommendations(10).getFirst().operated());
+		var flagKey = "it.flag_" + UUID.randomUUID().toString().replace("-", "");
+		var flag = admin.updateFeatureFlag(flagKey, reviewer,
+				new AdminApplicationService.FeatureFlagCommand(true, Map.of("percentage", 25), 0, "alpha"));
+		assertEquals(1, flag.version());
+		assertEquals(25, ((Map<?, ?>) admin.getFeatureFlag(flagKey).rule()).get("percentage"));
+		assertEquals(1, jdbc.queryForObject(
+				"SELECT COUNT(*) FROM tn_operation_audit WHERE action='FEATURE_FLAG_UPDATE' AND JSON_UNQUOTE(JSON_EXTRACT(target,'$.key'))=?",
+				Integer.class, flagKey));
+		var featureAudits = admin.listOperationAudits("FEATURE_FLAG_UPDATE");
+		assertFalse(featureAudits.isEmpty());
+		assertEquals(reviewer, featureAudits.getFirst().actorId());
+		assertEquals(flagKey, featureAudits.getFirst().target().get("key"));
+		var registration = admin.listFeatureFlags().stream().filter(item -> "registration.enabled".equals(item.key()))
+				.findFirst().orElse(null);
+		var registrationVersion = registration == null ? 0 : registration.version();
+		admin.updateFeatureFlag("registration.enabled", reviewer, new AdminApplicationService.FeatureFlagCommand(false,
+				Map.of("percentage", 100), registrationVersion, "integration off"));
+		assertFalse(featureFlags.enabled("registration.enabled", "closed@example.com"));
+		admin.updateFeatureFlag("registration.enabled", reviewer, new AdminApplicationService.FeatureFlagCommand(true,
+				Map.of("percentage", 100), registrationVersion + 1, "integration restore"));
+		assertTrue(featureFlags.enabled("registration.enabled", "closed@example.com"));
 		var idempotencyKey = "it-" + UUID.randomUUID();
 		var requestHash = hash("request-one");
 		var reservation = idempotency.reserve(owner, idempotencyKey, "POST", "/api/v1/contents", requestHash);
@@ -177,19 +251,85 @@ class MySqlPersistenceIntegrationTest {
 		var completed = operations.findSuggestion(job.id()).orElseThrow();
 		admin.decideAiSuggestion(job.id(), reviewer,
 				new AdminApplicationService.AiDecisionCommand("ACCEPT", null, completed.version()));
+		var acceptedSuggestions = admin.listAiSuggestions("ACCEPTED");
+		assertFalse(acceptedSuggestions.isEmpty());
+		assertEquals(job.id(), acceptedSuggestions.getFirst().id());
+		assertEquals(article.id(), acceptedSuggestions.getFirst().targetId());
+		assertEquals("Article v2", contents.get(article.id(), null).title());
 		assertNotNull(admin.dashboard());
 		assertFalse(audits.list(null, 100).isEmpty());
 		assertFalse(audits.list(AuditState.APPROVED, 100).isEmpty());
 
 		var uploadId = UUID.randomUUID();
 		var fileId = UUID.randomUUID();
-		files.begin(new FileRecordPort.UploadRecord(uploadId, fileId, owner, "it/" + fileId, uniqueSha256(), 12,
-				"text/plain", Instant.now().plusSeconds(600)));
+		var fileHash = uniqueSha256();
+		var firstUpload = files.begin(new FileRecordPort.UploadRecord(uploadId, fileId, owner, "it/" + fileId, fileHash,
+				12, "text/plain", Instant.now().plusSeconds(600)));
+		assertFalse(firstUpload.reused());
 		assertEquals(fileId, files.requireUpload(uploadId, owner).fileId());
 		files.markScanning(uploadId, owner);
 		var scan = files.claimNextScan(Instant.now()).orElseThrow();
+		var prematureDuplicate = new FileRecordPort.UploadRecord(UUID.randomUUID(), UUID.randomUUID(), provider,
+				"it/premature-" + UUID.randomUUID(), fileHash, 12, "text/plain", Instant.now().plusSeconds(600));
+		var reuseError = assertThrows(DomainException.class, () -> files.begin(prematureDuplicate));
+		assertEquals("FILE_REUSE_UNAVAILABLE", reuseError.code());
 		files.markAvailable(scan.fileId(), "text/plain");
+		assertEquals("AVAILABLE", files.requireOwned(fileId, owner).state());
 		assertEquals("text/plain", files.requireDownloadable(fileId, owner).detectedMime());
+
+		var tagSuffix = UUID.randomUUID().toString().replace("-", "");
+		var sourceTag = community.createTag(reviewer, new CommunityApplicationService.TagCreateCommand(
+				"it-source-" + tagSuffix, List.of("it-alias-" + tagSuffix), "integration"));
+		var targetTag = community.createTag(reviewer,
+				new CommunityApplicationService.TagCreateCommand("it-target-" + tagSuffix, List.of(), "integration"));
+		var tagId = sourceTag.id();
+		var attached = contents.create(owner, new ContentApplicationService.ContentCommand("DOCUMENT", "PUBLIC",
+				"Attached", "Summary", "Body", List.of(tagId), List.of(fileId)));
+		assertEquals(List.of(tagId), contents.get(attached.id(), owner).tagIds());
+		var mergedTag = community.mergeTag(sourceTag.id(), reviewer, new CommunityApplicationService.TagMergeCommand(
+				targetTag.id(), sourceTag.version(), targetTag.version(), "integration merge"));
+		assertEquals(targetTag.id(), contents.get(attached.id(), owner).tagIds().getFirst());
+		assertTrue(mergedTag.target().aliases().contains(sourceTag.name()));
+		assertTrue(contents.listTags().stream().noneMatch(tag -> tag.id().equals(sourceTag.id())));
+		var batchFirst = community.createTag(reviewer,
+				new CommunityApplicationService.TagCreateCommand("it-batch-a-" + tagSuffix, List.of(), "batch"));
+		var batchSecond = community.createTag(reviewer,
+				new CommunityApplicationService.TagCreateCommand("it-batch-b-" + tagSuffix, List.of(), "batch"));
+		var batch = batches.executeTagStatusBatch(reviewer,
+				new BatchApplicationService.TagStatusBatchCommand(false,
+						List.of(new BatchApplicationService.TagStatusItem(batchFirst.id(), batchFirst.version()),
+								new BatchApplicationService.TagStatusItem(batchSecond.id(), 99)),
+						"integration partial batch"));
+		assertEquals("PARTIAL_FAILED", batch.status());
+		assertEquals("VERSION_CONFLICT", batches.getBatch(batch.id()).items().get(1).errorCode());
+		assertFalse(community.getTag(batchFirst.id()).enabled());
+		assertTrue(community.getTag(batchSecond.id()).enabled());
+		assertEquals(List.of(fileId), contents.get(attached.id(), owner).fileIds());
+		assertEquals(1, jdbc.queryForObject("""
+				SELECT COUNT(*) FROM tn_file_relation WHERE target_type='CONTENT' AND target_public_id=?
+				""", Integer.class, bytes(attached.id())));
+		assertThrows(DomainException.class, () -> files.requireDownloadable(fileId, provider));
+		var attachedSubmitted = contents.submit(attached.id(), owner, attached.version());
+		var attachedTask = audits.findById(attachedSubmitted.auditTaskId()).orElseThrow();
+		admin.decideAuditTask(attachedTask.publicId(), reviewer, new AdminApplicationService.AuditDecisionCommand(
+				"APPROVED", "QUALITY_OK", null, attachedTask.version()));
+		assertEquals("text/plain", files.requireDownloadable(fileId, reviewer).detectedMime());
+		assertEquals("text/plain", files.requireDownloadable(fileId, provider).detectedMime());
+
+		var duplicateUploadId = UUID.randomUUID();
+		var duplicateCandidateId = UUID.randomUUID();
+		var duplicate = files.begin(new FileRecordPort.UploadRecord(duplicateUploadId, duplicateCandidateId, provider,
+				"it/" + duplicateCandidateId, fileHash, 12, "text/plain", Instant.now().plusSeconds(600)));
+		assertTrue(duplicate.reused());
+		assertEquals(fileId, duplicate.fileId());
+		assertEquals("AVAILABLE", files.markScanning(duplicateUploadId, provider));
+		assertEquals("text/plain", files.requireDownloadable(fileId, provider).detectedMime());
+		assertEquals("text/plain", files.requireDownloadable(fileId, reviewer).detectedMime());
+		assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM tn_file_object WHERE sha256=? AND size_bytes=12",
+				Integer.class, java.util.HexFormat.of().parseHex(fileHash)));
+		assertEquals(2, jdbc.queryForObject(
+				"SELECT COUNT(*) FROM tn_file_relation r JOIN tn_file_object f ON f.id=r.file_object_id WHERE f.public_id=?",
+				Integer.class, bytes(fileId)));
 
 		var blockedUpload = UUID.randomUUID();
 		var blockedFile = UUID.randomUUID();
@@ -199,7 +339,7 @@ class MySqlPersistenceIntegrationTest {
 		var failedScan = files.claimNextScan(Instant.now()).orElseThrow();
 		files.markScanFailed(failedScan.fileId(), failedScan.attempt(), Instant.now(), "temporary");
 		var retry = files.claimNextScan(Instant.now().plusSeconds(1)).orElseThrow();
-		files.markBlocked(retry.fileId(), "malware");
+		files.markBlocked(retry.fileId(), "malware", "quarantine/" + retry.fileId());
 	}
 
 	private static String uniqueSha256() {

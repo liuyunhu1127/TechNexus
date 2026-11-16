@@ -55,9 +55,10 @@ jobs:
           org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom
           -DskipTests -DoutputFormat=json -DoutputName=bom
       - name: Scan backend SBOM and frontend lockfiles
-        uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
+        uses: google/osv-scanner-action/osv-scanner-action@v2.7.0
         with:
           scan-args: |-
+            --config=osv-scanner.toml
             -L target/bom.json
             -L technexus-web/package-lock.json
             -L technexus-admin/package-lock.json

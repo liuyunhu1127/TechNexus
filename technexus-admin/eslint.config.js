@@ -17,5 +17,17 @@ export default tseslint.config(
 	  'vue/singleline-html-element-content-newline': 'off',
     },
   },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        AbortSignal: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+        URL: 'readonly',
+        WebSocket: 'readonly',
+      },
+    },
+  },
   { languageOptions: { globals: { document: 'readonly', sessionStorage: 'readonly', window: 'readonly' } } },
 )

@@ -14,6 +14,7 @@ import com.technexus.content.domain.ContentState;
 import com.technexus.content.domain.Post;
 import com.technexus.content.domain.PostType;
 import com.technexus.content.domain.PostVersion;
+import com.technexus.server.content.application.port.ContentAssociationPort;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -25,11 +26,14 @@ public class ContentApplicationService {
 	private final ArticleRepository articles;
 	private final PostRepository posts;
 	private final AuditTaskRepository audits;
+	private final ContentAssociationPort associations;
 
-	public ContentApplicationService(ArticleRepository articles, PostRepository posts, AuditTaskRepository audits) {
+	public ContentApplicationService(ArticleRepository articles, PostRepository posts, AuditTaskRepository audits,
+			ContentAssociationPort associations) {
 		this.articles = articles;
 		this.posts = posts;
 		this.audits = audits;
+		this.associations = associations;
 	}
 
 	public ContentView create(UUID ownerId, ContentCommand command) {
@@ -39,20 +43,22 @@ public class ContentApplicationService {
 			var article = new Article(id, ownerId, visibility,
 					new ArticleVersion(UuidV7.generate(), 1, command.title(), command.summary(), command.body()));
 			articles.add(article);
-			return articleView(article, true);
+			associations.replace(id, ownerId, "DOCUMENT", empty(command.tagIds()), empty(command.fileIds()));
+			return withAssociations(articleView(article, true));
 		}
 		var type = postType(command.type());
 		var post = new Post(id, ownerId, type, visibility,
 				new PostVersion(UuidV7.generate(), 1, command.title(), command.body()));
 		posts.add(post);
-		return postView(post, true);
+		associations.replace(id, ownerId, type.name(), empty(command.tagIds()), empty(command.fileIds()));
+		return withAssociations(postView(post, true));
 	}
 
 	@Transactional(readOnly = true)
 	public List<ContentView> listPublic() {
 		var result = new java.util.ArrayList<ContentView>();
-		articles.listPublished(50).forEach(value -> result.add(articleView(value, false)));
-		posts.listPublished(50).forEach(value -> result.add(postView(value, false)));
+		articles.listPublished(50).forEach(value -> result.add(withAssociations(articleView(value, false))));
+		posts.listPublished(50).forEach(value -> result.add(withAssociations(postView(value, false))));
 		return result.stream().limit(50).toList();
 	}
 
@@ -68,11 +74,11 @@ public class ContentApplicationService {
 		var article = articles.findById(id);
 		if (article.isPresent()) {
 			requireVisible(article.get().ownerId(), article.get().state(), article.get().visibility(), actorId);
-			return articleView(article.get(), article.get().ownerId().equals(actorId));
+			return withAssociations(articleView(article.get(), article.get().ownerId().equals(actorId)));
 		}
 		var post = posts.findById(id).orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "内容不存在"));
 		requireVisible(post.ownerId(), post.state(), post.visibility(), actorId);
-		return postView(post, post.ownerId().equals(actorId));
+		return withAssociations(postView(post, post.ownerId().equals(actorId)));
 	}
 
 	public ContentView update(UUID id, UUID actorId, long expectedVersion, ContentCommand command) {
@@ -86,7 +92,8 @@ public class ContentApplicationService {
 					fallback(command.body(), current.body()),
 					command.visibility() == null ? value.visibility() : visibility(command.visibility()));
 			articles.save(value);
-			return articleView(value, true);
+			associations.replace(id, actorId, "DOCUMENT", command.tagIds(), command.fileIds());
+			return withAssociations(articleView(value, true));
 		}
 		var post = posts.findById(id).orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "内容不存在"));
 		requireVersion(post.version(), expectedVersion);
@@ -95,7 +102,8 @@ public class ContentApplicationService {
 				fallback(command.body(), current.body()),
 				command.visibility() == null ? post.visibility() : visibility(command.visibility()));
 		posts.save(post);
-		return postView(post, true);
+		associations.replace(id, actorId, post.type().name(), command.tagIds(), command.fileIds());
+		return withAssociations(postView(post, true));
 	}
 
 	public ContentView submit(UUID id, UUID actorId, long expectedVersion) {
@@ -106,20 +114,27 @@ public class ContentApplicationService {
 			requireOwner(value.ownerId(), actorId);
 			var existing = existingAudit(value.publicId(), value.pendingVersionId());
 			if (existing != null)
-				return withAudit(articleView(value, true), existing.publicId());
+				return withAudit(withAssociations(articleView(value, true)), existing.publicId());
 			var targetVersionId = value.submit(actorId);
 			articles.save(value);
-			return withAudit(articleView(value, true), createAudit(value.publicId(), targetVersionId).publicId());
+			return withAudit(withAssociations(articleView(value, true)),
+					createAudit(value.publicId(), targetVersionId).publicId());
 		}
 		var post = posts.findById(id).orElseThrow(() -> new DomainException("RESOURCE_NOT_FOUND", "内容不存在"));
 		requireVersion(post.version(), expectedVersion);
 		requireOwner(post.ownerId(), actorId);
 		var existing = existingAudit(post.publicId(), post.pendingVersionId());
 		if (existing != null)
-			return withAudit(postView(post, true), existing.publicId());
+			return withAudit(withAssociations(postView(post, true)), existing.publicId());
 		var targetVersionId = post.submit(actorId);
 		posts.save(post);
-		return withAudit(postView(post, true), createAudit(post.publicId(), targetVersionId).publicId());
+		return withAudit(withAssociations(postView(post, true)),
+				createAudit(post.publicId(), targetVersionId).publicId());
+	}
+
+	@Transactional(readOnly = true)
+	public List<ContentAssociationPort.TagOption> listTags() {
+		return associations.listTags();
 	}
 
 	private AuditTask createAudit(UUID contentId, UUID targetVersionId) {
@@ -138,16 +153,21 @@ public class ContentApplicationService {
 	private static ContentView articleView(Article article, boolean owner) {
 		var version = selectArticleVersion(article, owner);
 		return new ContentView(article.publicId(), "DOCUMENT", article.state().name(), article.visibility().name(),
-				version.title(), version.summary(), version.body(), article.version(), null);
+				version.title(), version.summary(), version.body(), article.version(), null, List.of(), List.of());
 	}
 	private static ContentView postView(Post post, boolean owner) {
 		var version = selectPostVersion(post, owner);
 		return new ContentView(post.publicId(), post.type().name(), post.state().name(), post.visibility().name(),
-				version.title(), "", version.body(), post.version(), null);
+				version.title(), "", version.body(), post.version(), null, List.of(), List.of());
+	}
+	private ContentView withAssociations(ContentView value) {
+		var linked = associations.get(value.id(), value.type());
+		return new ContentView(value.id(), value.type(), value.state(), value.visibility(), value.title(),
+				value.summary(), value.body(), value.version(), value.auditTaskId(), linked.tagIds(), linked.fileIds());
 	}
 	private static ContentView withAudit(ContentView value, UUID auditTaskId) {
 		return new ContentView(value.id(), value.type(), value.state(), value.visibility(), value.title(),
-				value.summary(), value.body(), value.version(), auditTaskId);
+				value.summary(), value.body(), value.version(), auditTaskId, value.tagIds(), value.fileIds());
 	}
 	private static ArticleVersion selectArticleVersion(Article article, boolean owner) {
 		if (!owner && article.publishedVersionId() != null)
@@ -190,10 +210,18 @@ public class ContentApplicationService {
 		}
 	}
 
-	public record ContentCommand(String type, String visibility, String title, String summary, String body) {
+	private static List<UUID> empty(List<UUID> values) {
+		return values == null ? List.of() : List.copyOf(values);
+	}
+
+	public record ContentCommand(String type, String visibility, String title, String summary, String body,
+			List<UUID> tagIds, List<UUID> fileIds) {
+		public ContentCommand(String type, String visibility, String title, String summary, String body) {
+			this(type, visibility, title, summary, body, List.of(), List.of());
+		}
 	}
 	public record ContentView(UUID id, String type, String state, String visibility, String title, String summary,
-			String body, long version, UUID auditTaskId) {
+			String body, long version, UUID auditTaskId, List<UUID> tagIds, List<UUID> fileIds) {
 	}
 	private static void requireOwner(UUID ownerId, UUID actorId) {
 		if (!ownerId.equals(actorId))

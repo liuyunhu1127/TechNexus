@@ -34,7 +34,7 @@ class DatabaseNamingTest {
 		assertEquals(tables.size(), CREATE_TABLE.matcher(sql).results().count());
 		assertTrue(tables.stream().allMatch(name -> name.matches("tn_[a-z0-9]+(?:_[a-z0-9]+)*")));
 
-		assertEquals(11, migrations.size());
+		assertEquals(14, migrations.size());
 		for (int index = 0; index < migrations.size(); index++) {
 			assertTrue(migrations.get(index).getFileName().toString().startsWith("V" + (index + 1) + "__"));
 		}

@@ -3,10 +3,12 @@ package com.technexus.server.content.application;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 
 import com.technexus.common.domain.DomainException;
 import com.technexus.server.content.infrastructure.InMemoryArticleRepository;
 import com.technexus.server.content.infrastructure.InMemoryPostRepository;
+import com.technexus.server.content.infrastructure.InMemoryContentAssociationAdapter;
 import com.technexus.server.admin.infrastructure.InMemoryAuditTaskRepository;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -14,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class ContentApplicationServiceTest {
 	private final InMemoryAuditTaskRepository audits = new InMemoryAuditTaskRepository();
 	private final ContentApplicationService service = new ContentApplicationService(new InMemoryArticleRepository(),
-			new InMemoryPostRepository(), audits);
+			new InMemoryPostRepository(), audits, new InMemoryContentAssociationAdapter());
 	private final UUID owner = UUID.randomUUID();
 
 	@Test
@@ -56,6 +58,23 @@ class ContentApplicationServiceTest {
 		var error = assertThrows(DomainException.class, () -> service.get(created.id(), UUID.randomUUID()));
 
 		assertEquals("RESOURCE_NOT_FOUND", error.code());
+	}
+
+	@Test
+	void preservesTagAndFileAssociationsAcrossCreateAndUpdate() {
+		var tagId = UUID.randomUUID();
+		var fileId = UUID.randomUUID();
+		var created = service.create(owner, new ContentApplicationService.ContentCommand("DOCUMENT", "OWNER_ONLY",
+				"Linked", "Summary", "Body", java.util.List.of(tagId), java.util.List.of(fileId)));
+
+		assertIterableEquals(java.util.List.of(tagId), created.tagIds());
+		assertIterableEquals(java.util.List.of(fileId), created.fileIds());
+
+		var updated = service.update(created.id(), owner, created.version(),
+				new ContentApplicationService.ContentCommand(null, null, "Linked v2", null, null, java.util.List.of(),
+						java.util.List.of(fileId)));
+		assertEquals(java.util.List.of(), updated.tagIds());
+		assertIterableEquals(java.util.List.of(fileId), updated.fileIds());
 	}
 
 	private static ContentApplicationService.ContentCommand command(String type, String visibility, String title) {

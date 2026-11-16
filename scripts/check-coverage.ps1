@@ -22,7 +22,7 @@ $allModules = $domainModules + 'technexus-server'
 function Get-CounterTotals {
     param(
         [string[]]$Modules,
-        [string]$CounterType
+        [string]$RequestedCounterType
     )
 
     $covered = 0L
@@ -33,12 +33,12 @@ function Get-CounterTotals {
             throw "Missing JaCoCo report: $reportPath. Run 'mvn clean verify' first."
         }
         [xml]$report = Get-Content -LiteralPath $reportPath -Raw
-        $counter = @($report.report.counter) | Where-Object { $_.type -eq $CounterType }
-        if ($counter.Count -ne 1) {
-            throw "Expected one $CounterType counter in $reportPath."
+        $matchedCounter = @(@($report.report.counter) | Where-Object { $_.type -eq $RequestedCounterType })
+        if ($matchedCounter.Count -ne 1) {
+            throw "Expected one $RequestedCounterType counter in $reportPath."
         }
-        $covered += [long]$counter.covered
-        $missed += [long]$counter.missed
+        $covered += [long]$matchedCounter.covered
+        $missed += [long]$matchedCounter.missed
     }
     return [pscustomobject]@{ Covered = $covered; Missed = $missed }
 }
@@ -50,8 +50,8 @@ function Get-Percent {
     return 100.0 * $Counter.Covered / $total
 }
 
-$totalLines = Get-CounterTotals -Modules $allModules -CounterType 'LINE'
-$domainBranches = Get-CounterTotals -Modules $domainModules -CounterType 'BRANCH'
+$totalLines = Get-CounterTotals -Modules $allModules -RequestedCounterType 'LINE'
+$domainBranches = Get-CounterTotals -Modules $domainModules -RequestedCounterType 'BRANCH'
 $totalLinePercent = Get-Percent $totalLines
 $domainBranchPercent = Get-Percent $domainBranches
 

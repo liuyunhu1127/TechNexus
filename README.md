@@ -1,8 +1,8 @@
 # TechNexus
 
-TechNexus 是面向技术内容、真实需求、交付方案和知识沉淀闭环的 Alpha 工程。后端采用 Java 21、Spring Boot 3.5、Jetty、DDD 模块化单体和 MySQL；用户端采用 Nuxt 3，管理端采用 Vue 3/Vite。
+TechNexus 是面向技术内容、真实需求、交付方案和知识沉淀闭环的 Alpha 工程。后端采用 Java 21、Spring Boot 4.0、Jetty、DDD 模块化单体和 MySQL；用户端采用 Nuxt 4，管理端采用 Vue 3/Vite。
 
-> 当前状态：阶段四测试尚未通过，不可直接用于生产或真实用户上线。已知阻断项包括文件 Hash 去重/File Relation、真实 S3/ClamAV 联调、非同主机备份和候选服务器专项验证。详见[阶段四测试报告](docs/technexus-solution-closure/04-测试阶段/测试报告.md)。
+> 当前状态：阶段四测试尚未通过，不可直接用于生产或真实用户上线。`TNX-GATE-001/002` 与 `TNX-FUNC-001/002` 已完成；剩余阻断项包括非同主机备份、系统级业务闭环和候选服务器/外部专项验证。详见[阶段四测试报告](docs/technexus-solution-closure/04-测试阶段/测试报告.md)。
 
 ## 1. 工程结构
 
@@ -10,7 +10,7 @@ TechNexus 是面向技术内容、真实需求、交付方案和知识沉淀闭�
 
 | 工程 | 作用 |
 |---|---|
-| `technexus-web` | Nuxt 3 用户端 |
+| `technexus-web` | Nuxt 4 用户端 |
 | `technexus-admin` | Vue 3/Vite 管理端 |
 | `technexus-server` | Spring Boot 组合根、HTTP 入口和基础设施适配器 |
 | `technexus-common` | 共享内核 |
@@ -219,6 +219,25 @@ Invoke-RestMethod http://localhost:8080/api/v1/demands
 node ./scripts/performance-smoke.mjs
 ```
 
+候选服务器容量门禁使用 `scripts/candidate/`。本机可执行缩短预演，但输出会固定标记为非门禁；正式候选运行要求独立负载机、非 loopback HTTPS URL、指标 Token、数据库快照和至少 30 分钟稳定窗口：
+
+```powershell
+./scripts/candidate/Invoke-TechNexusCandidateGate.ps1 `
+  -Classification LOCAL_REHEARSAL `
+  -BaseUrl http://127.0.0.1:8080 `
+  -SustainedSeconds 20 -BurstSeconds 10 -StabilitySeconds 60
+```
+
+完整候选机执行方式和目标机并行资源采集见 `scripts/candidate/README.md`。
+
+用户端浏览器、移动视口、键盘、可访问性和 SSR/SEO 本机技术检查：
+
+```powershell
+npm --prefix technexus-web run test:quality-smoke
+```
+
+该命令会启动临时 Nuxt/Mock API 和本机 Edge、Chrome 无窗口实例。移动结果是 390×844 视口仿真，不能替代真实 Android 和 Safari iOS 的候选环境验收。
+
 ## 6. 首个管理员账号
 
 管理员身份由 `TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL` 与登录账号邮箱匹配产生。初始化流程：
@@ -272,16 +291,16 @@ $login.accessToken
 
 ### 7.2 普通用户登录
 
-1. 账号需先通过注册 API 建立；当前 Alpha 页面尚未提供注册表单；
-2. 打开 `http://localhost:3000/login`；
-3. 输入注册邮箱和至少 12 位的密码；
-4. 登录成功后进入技术内容页。
+1. 新用户打开 `http://localhost:3000/register`，填写显示名称、邮箱和至少 12 位的密码；
+2. 注册成功后进入登录页；已有账号可直接打开 `http://localhost:3000/login`；
+3. 输入注册邮箱和密码；
+4. 登录成功后进入技术内容页。页面会在同一浏览器会话中通过 Refresh Cookie 恢复登录态，也可从导航栏安全退出。
 
-当前用户端将 Access Token 保存在 Nuxt 页面状态中，刷新页面后需要重新登录。Refresh/Logout API 已实现，但页面尚未接入自动刷新和退出按钮。
+Access Token 仅保存在 Nuxt 内存状态中；页面刷新时使用 `HttpOnly` Refresh Cookie 与会话级 CSRF Token 换取新 Token，不把 Access Token 写入持久化存储。
 
 ### 7.3 内容与需求操作边界
 
-后端已经提供内容、需求、审核和定价 API，但当前用户端只实现公开列表，没有创建、编辑、提交审核、详情或方案页面。这些操作应使用 API 客户端，并以 `docs/technexus-solution-closure/02-设计阶段/openapi.yaml` 为准。
+用户端已经支持内容和需求的公开列表/详情、草稿创建与编辑、提交审核、已发布需求的方案提交、评论提交，以及标签选择、文件直传、安全扫描、内容绑定和授权下载。标签创建、启停、别名和合并属于管理端运营能力；其余完整业务状态流仍在阶段四待办中。尚未提供的操作应使用受控 API 客户端，并以 `docs/technexus-solution-closure/02-设计阶段/openapi.yaml` 为准。
 
 所有 POST、PUT、PATCH、DELETE 请求除登录和刷新外，均应带唯一的 `Idempotency-Key`。更新、提交、审核和定价操作还需提交服务端返回的当前版本，旧版本会返回 409。
 
@@ -307,14 +326,18 @@ $login.accessToken
 
 Token 只保存在当前浏览器的 `sessionStorage`；关闭标签页后应重新输入。不要在截图、工单或聊天中发送 Token。
 
-### 8.2 审核、定价与配置
+### 8.2 审核、定价、配置与运营
 
-当前管理端导航已显示“审核任务”“定价确认”“系统配置”，但页面操作尚未实现。相应后端 API 已存在，暂时需要通过受控 API 客户端执行：
+管理端已经提供以下真实 API 页面操作：
 
-- `GET /api/v1/admin/audit-tasks`：查询审核任务；
-- `POST /api/v1/admin/audit-tasks/{taskId}/decisions`：提交人工审核决定；
-- `POST /api/v1/admin/prices/{targetType}/{targetId}/confirmations`：确认价格；
-- 配置与 AI 建议接口以 OpenAPI 契约为准。
+- 审核任务查询、状态筛选和人工决定；
+- V1 免费定价确认；
+- 系统参数与独立 Feature Flag 的版本化更新；
+- AI 建议任务创建、状态查询和人工接受、编辑或拒绝；
+- 标准标签创建、启停、别名维护和合并；
+- 特权操作审计查询。
+
+写操作会自动携带 `Idempotency-Key`，版本冲突返回 409。标签合并会迁移文章/帖子关系并保留源标准名和别名；执行前应从列表读取源、目标当前版本。
 
 AI 输出只能作为建议，不得直接覆盖审核、最终价格、权限或封禁事实。
 
@@ -330,6 +353,10 @@ AI 输出只能作为建议，不得直接覆盖审核、最终价格、权限�
 ### 后端提示 JWT Secret 长度不足
 
 `TECHNEXUS_JWT_SECRET` 必须至少包含 32 个 UTF-8 字节。不要使用 README 或 `.env.example` 中的占位值部署。
+
+### 反向代理后的 HTTPS 被识别为 HTTP
+
+默认 `TECHNEXUS_FORWARD_HEADERS_STRATEGY=none`，防止客户端伪造 `X-Forwarded-*`。只有后端端口不对公网开放且所有流量均经过可信反向代理时，才设置为 `framework`；同时由代理完成 80→443 跳转、证书、HSTS 和真实客户端地址覆盖。
 
 ### 后端提示 Object storage credentials are missing
 
@@ -369,16 +396,18 @@ AI 输出只能作为建议，不得直接覆盖审核、最终价格、权限�
 - OpenAPI：`docs/technexus-solution-closure/02-设计阶段/openapi.yaml`
 - 开发规范：`docs/technexus-solution-closure/03-开发阶段/`
 - 测试计划、用例、报告和 RTM：`docs/technexus-solution-closure/04-测试阶段/`
+- 剩余工作与 Multica 迁移清单：`docs/technexus-solution-closure/04-测试阶段/Multica迁移待办.md`
 - Git 工作流：`docs/technexus-solution-closure/03-开发阶段/Git工作流规范.md`
 
 ## 12. 当前已知限制
 
 - 阶段四第 1 轮评分 69，尚未通过阶段门禁；
-- 同 Hash 文件复用与独立 File Relation 尚未正确闭环；
-- 真实 S3/MinIO + ClamAV 上传、扫描、隔离和下载 E2E 尚未完成；
+- `TNX-GATE-001` 标准 Java 21/Maven、双前端、覆盖率、SBOM/OSV 与 Gitleaks 门禁已于 2026-10-28 通过；
+- `TNX-GATE-002` 已完成真实 S3 兼容存储 + ClamAV 上传、Magic/Hash 校验、扫描、隔离、授权下载、同 Hash/IDOR、清理和故障恢复 E2E；证据见 `文件安全E2E证据-20261028.md`；
 - 缺少非同主机备份，禁止真实用户上线；
-- 用户端尚无注册、内容/需求创建编辑和退出页面；
-- 管理端目前只实现运营总览，审核、定价和配置页面仍待实现；
-- 目标服务器性能、主流浏览器、可访问性、可观测性和渗透测试仍待补充。
+- 备份/恢复脚本和本机隔离演练已完成，运行方式、远端目标约束及告警要求见[异机备份与恢复运行手册](docs/technexus-solution-closure/04-测试阶段/异机备份与恢复运行手册.md)；本机演练不能替代真实异机证据；
+- `TNX-FUNC-001` 已完成注册、会话恢复/退出、内容和需求创建编辑/提交审核、方案、评论、标签选择、文件上传/扫描/绑定/下载，并有 Chromium UI smoke；完整后端业务闭环仍归 `TNX-VAL-001`；
+- 管理端已实现运营总览、审核任务查询/人工决定、V1 免费定价、配置并发更新、独立 Feature Flag、分类/推荐、AI 建议列表/人工决定、标签运营、操作审计和批量逐项结果；系统级业务闭环继续由 `TNX-VAL-001` 验证；
+- 浏览器/a11y/SEO 与可观测性应用侧本机专项已通过；真实 Android/Safari、候选 Prometheus/Alertmanager/日志平台、告警送达及渗透测试仍待补充；可观测性检查见 `scripts/observability/`，规则和处置见[可观测性与告警运行手册](docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md)。
 
 在这些事项关闭并通过测试与上线评审前，不应将当前 Alpha 构建解释为生产就绪。

@@ -29,4 +29,7 @@ public class TestObjectStorageAdapter implements ObjectStoragePort {
 	public PresignedDownload presignDownload(String key) {
 		return new PresignedDownload(URI.create("https://storage.test/" + key), Instant.now().plusSeconds(300));
 	}
+	@Override
+	public void quarantine(String sourceKey, String quarantineKey) {
+	}
 }
