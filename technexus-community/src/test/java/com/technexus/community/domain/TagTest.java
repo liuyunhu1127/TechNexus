@@ -25,4 +25,13 @@ class TagTest {
 		assertThrows(DomainException.class, () -> new Tag(UUID.randomUUID(), " "));
 		assertThrows(DomainException.class, () -> new Tag(UUID.randomUUID(), "x".repeat(49)));
 	}
+
+	@Test
+	void normalizesAliasesAndSupportsDisableBeforeMerge() {
+		var tag = new Tag(UUID.randomUUID(), "Spring", java.util.List.of(" Spring Framework "));
+		assertEquals(java.util.Set.of("spring framework"), tag.aliases());
+		tag.setEnabled(false);
+		assertEquals(false, tag.enabled());
+		assertThrows(DomainException.class, () -> tag.replaceAliases(java.util.List.of("spring", "spring boot")));
+	}
 }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: technexus-server API
-  version: 1.0.1
+  version: 1.0.9
   x-service-name: technexus-server
   description: >-
     TechNexus V1 user and administration contract. Demand is not an Order and
@@ -219,6 +219,22 @@ paths:
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
   /contents/{contentId}/comments:
+    get:
+      tags: [Content]
+      operationId: listComments
+      x-requirements: [FR-CNT-03]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ContentId'
+      responses:
+        '200':
+          description: Two-level comment thread including deleted-parent placeholders
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommentPage'}
+        '404': {$ref: '#/components/responses/Problem'}
     post:
       tags: [Content]
       operationId: createComment
@@ -240,6 +256,32 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
         '429': {$ref: '#/components/responses/RateLimited'}
+  /contents/{contentId}/comments/{commentId}:
+    delete:
+      tags: [Content]
+      operationId: deleteComment
+      x-requirements: [FR-CNT-03]
+      parameters:
+        - $ref: '#/components/parameters/ContentId'
+        - name: commentId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Uuid'}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExpectedVersionCommand'}
+      responses:
+        '200':
+          description: Comment body removed while replies remain linked
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommentResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /contents/{contentId}/demands:
     post:
       tags: [Lineage, Demand]
@@ -464,6 +506,21 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /files/{fileId}:
+    get:
+      tags: [File]
+      operationId: getFileStatus
+      x-requirements: [FR-FILE-03, FR-FILE-04]
+      parameters:
+        - $ref: '#/components/parameters/FileId'
+      responses:
+        '200':
+          description: Owner-visible scan status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
   /files/{fileId}/download-url:
     post:
       tags: [File]
@@ -480,6 +537,20 @@ paths:
               schema: {$ref: '#/components/schemas/DownloadUrlResponse'}
         '404': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
+  /tags:
+    get:
+      tags: [Content]
+      operationId: listTags
+      x-requirements: [FR-CNT-07]
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Active tags available for content association
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TagListResponse'}
   /search:
     get:
       tags: [Search]
@@ -493,13 +564,18 @@ paths:
           in: query
           required: true
           schema: {type: string, minLength: 2, maxLength: 100}
-        - name: types
+        - name: type
           in: query
-          schema:
-            type: array
-            items: {type: string, enum: [CONTENT, DEMAND, USER, TAG]}
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/PageSize'
+          schema: {type: string, enum: [ALL, CONTENT, DEMAND, USER, TAG]}
+        - name: sort
+          in: query
+          schema: {type: string, enum: [RELEVANCE, LATEST, HOT, FAVORITES, BUDGET, DEADLINE]}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+        - name: size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
       responses:
         '200':
           description: Public/authorized results
@@ -507,6 +583,24 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SearchPage'}
         '400': {$ref: '#/components/responses/Problem'}
+  /recommendations:
+    get:
+      tags: [Search]
+      operationId: listRecommendations
+      x-requirements: [FR-RCM-01]
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Operator-pinned targets precede organic public discovery results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecommendationPage'}
   /notifications:
     get:
       tags: [Notification]
@@ -660,7 +754,137 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/feature-flags:
+    get:
+      tags: [Operations]
+      operationId: listFeatureFlags
+      x-requirements: [FR-CFG-02]
+      responses:
+        '200':
+          description: Feature flags and rollout rules
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FeatureFlagPage'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/category-config:
+    get:
+      tags: [Operations]
+      operationId: getCategoryConfig
+      x-requirements: [FR-CAT-01, FR-CFG-01, FR-CFG-02]
+      responses:
+        '200':
+          description: Extensible categories with two or three homepage core directions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CategoryConfigResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Operations]
+      operationId: updateCategoryConfig
+      x-requirements: [FR-CAT-01, FR-CFG-01, FR-CFG-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CategoryConfigUpdate'}
+      responses:
+        '200':
+          description: Validated category configuration updated and audited
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CategoryConfigResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/recommendation-config:
+    get:
+      tags: [Operations]
+      operationId: getRecommendationConfig
+      x-requirements: [FR-RCM-01, FR-CFG-01, FR-CFG-02]
+      responses:
+        '200':
+          description: Operator-pinned discovery items in explicit priority order
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecommendationConfigResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Operations]
+      operationId: updateRecommendationConfig
+      x-requirements: [FR-RCM-01, FR-CFG-01, FR-CFG-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecommendationConfigUpdate'}
+      responses:
+        '200':
+          description: Validated pinned recommendation order updated and audited
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecommendationConfigResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/feature-flags/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z][a-z0-9_.-]{2,127}$'}
+    get:
+      tags: [Operations]
+      operationId: getFeatureFlag
+      x-requirements: [FR-CFG-02]
+      responses:
+        '200':
+          description: Feature flag detail
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FeatureFlagResponse'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Operations]
+      operationId: updateFeatureFlag
+      x-requirements: [FR-CFG-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FeatureFlagUpdate'}
+      responses:
+        '200':
+          description: Versioned feature flag updated and audited
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FeatureFlagResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/ai-suggestions:
+    get:
+      tags: [AI]
+      operationId: listAiSuggestions
+      x-requirements: [FR-AIOPS-01, FR-AIOPS-04]
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: {type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, ACCEPTED, EDITED, REJECTED]}
+      responses:
+        '200':
+          description: Latest AI suggestion tasks, optionally filtered by state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AiSuggestionPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
     post:
       tags: [AI]
       operationId: createAiSuggestion
@@ -707,6 +931,161 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/operation-audits:
+    get:
+      tags: [Operations]
+      operationId: listOperationAudits
+      x-requirements: [FR-CFG-01, FR-CFG-02, FR-AIOPS-04]
+      parameters:
+        - name: action
+          in: query
+          required: false
+          schema: {type: string, pattern: '^[A-Z][A-Z0-9_]{2,95}$'}
+      responses:
+        '200':
+          description: Latest privileged operation audit records, optionally filtered by action
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationAuditPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/tags:
+    get:
+      tags: [Operations]
+      operationId: listManagedTags
+      x-requirements: [FR-CNT-05, FR-AIOPS-02]
+      responses:
+        '200':
+          description: Managed tags including disabled and merged records
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedTagPage'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Operations]
+      operationId: createManagedTag
+      x-requirements: [FR-CNT-05, FR-AIOPS-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ManagedTagCreate'}
+      responses:
+        '201':
+          description: Standard tag created and audited
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedTagResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/tags/{tagId}:
+    parameters:
+      - name: tagId
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/Uuid'}
+    put:
+      tags: [Operations]
+      operationId: updateManagedTag
+      x-requirements: [FR-CNT-05, FR-AIOPS-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ManagedTagUpdate'}
+      responses:
+        '200':
+          description: Tag availability and aliases updated with optimistic locking
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedTagResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/tags/{tagId}/merges:
+    parameters:
+      - name: tagId
+        in: path
+        required: true
+        description: Source tag UUID
+        schema: {$ref: '#/components/schemas/Uuid'}
+    post:
+      tags: [Operations]
+      operationId: mergeManagedTag
+      x-requirements: [FR-CNT-05, FR-AIOPS-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ManagedTagMerge'}
+      responses:
+        '200':
+          description: Source relations and aliases migrated to the target tag and audited
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedTagMergeResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/batches:
+    get:
+      tags: [Operations]
+      operationId: listBatchJobs
+      x-requirements: [FR-AIOPS-02]
+      responses:
+        '200':
+          description: Latest batch jobs and aggregate results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchJobPage'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/batches/{batchId}:
+    parameters:
+      - name: batchId
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/Uuid'}
+    get:
+      tags: [Operations]
+      operationId: getBatchJob
+      x-requirements: [FR-AIOPS-02]
+      responses:
+        '200':
+          description: Batch job with ordered per-item results
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchJobResponse'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/tag-batches:
+    post:
+      tags: [Operations]
+      operationId: executeTagStatusBatch
+      x-requirements: [FR-CNT-05, FR-AIOPS-02]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TagStatusBatchRequest'}
+      responses:
+        '200':
+          description: Completed batch with successes and failures isolated per item
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BatchJobResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -872,7 +1251,7 @@ components:
     Content:
       type: object
       additionalProperties: false
-      required: [id, type, state, visibility, title, version]
+      required: [id, type, state, visibility, title, version, tagIds, fileIds]
       properties:
         id: {$ref: '#/components/schemas/Uuid'}
         type: {$ref: '#/components/schemas/ContentType'}
@@ -894,6 +1273,12 @@ components:
           maxItems: 20
           uniqueItems: true
           items: {$ref: '#/components/schemas/Uuid'}
+        sourceDemandId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+          description: Required only when a SOLUTION closes a demand.
+        sourceSolutionId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+          description: Required only when a DOCUMENT is distilled from a solution.
         publishedAt: {$ref: '#/components/schemas/Instant'}
         version: {type: integer, minimum: 0}
     ContentWrite:
@@ -966,12 +1351,22 @@ components:
       properties:
         data:
           type: object
-          required: [id, body, state, createdAt]
+          required: [id, authorId, body, state, version, createdAt]
           properties:
             id: {$ref: '#/components/schemas/Uuid'}
+            authorId: {$ref: '#/components/schemas/Uuid'}
+            parentId: {oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]}
             body: {type: string}
             state: {type: string, enum: [PENDING_REVIEW, PUBLISHED, REJECTED, DELETED, BLOCKED]}
+            version: {type: integer, minimum: 0}
             createdAt: {$ref: '#/components/schemas/Instant'}
+    CommentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CommentResponse/properties/data'}
     Demand:
       type: object
       additionalProperties: false
@@ -1121,6 +1516,23 @@ components:
           properties:
             id: {$ref: '#/components/schemas/Uuid'}
             state: {$ref: '#/components/schemas/FileState'}
+            detectedMime:
+              type: [string, 'null']
+              maxLength: 127
+    TagListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: {$ref: '#/components/schemas/Uuid'}
+              name: {type: string, minLength: 1, maxLength: 48}
     DownloadUrlResponse:
       type: object
       required: [data]
@@ -1133,19 +1545,43 @@ components:
             expiresAt: {$ref: '#/components/schemas/Instant'}
     SearchPage:
       type: object
+      required: [items, page, size, total, hasNext, sort]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [type, id, title, summary, publishedAt, relevance]
+            properties:
+              type: {type: string, enum: [CONTENT, DEMAND, USER, TAG]}
+              id: {$ref: '#/components/schemas/Uuid'}
+              title: {type: string}
+              summary: {type: string}
+              publishedAt: {$ref: '#/components/schemas/Instant'}
+              pinnedRank: {type: [integer, 'null']}
+              budgetMax: {type: [number, 'null']}
+              deadlineAt: {oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]}
+              relevance: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1}
+        total: {type: integer, minimum: 0}
+        hasNext: {type: boolean}
+        sort: {type: string}
+    RecommendationPage:
+      type: object
       required: [items]
       properties:
         items:
           type: array
           items:
             type: object
-            required: [type, id, title]
+            required: [targetType, targetId, rank, operated, data]
             properties:
-              type: {type: string, enum: [CONTENT, DEMAND, USER, TAG]}
-              id: {$ref: '#/components/schemas/Uuid'}
-              title: {type: string}
-              snippet: {type: string}
-        nextCursor: {type: [string, 'null']}
+              targetType: {type: string, enum: [CONTENT, DEMAND]}
+              targetId: {$ref: '#/components/schemas/Uuid'}
+              rank: {type: integer, minimum: 1}
+              operated: {type: boolean}
+              data: {type: object}
     NotificationPage:
       type: object
       required: [items]
@@ -1249,6 +1685,86 @@ components:
             key: {type: string}
             value: {}
             version: {type: integer, minimum: 0}
+    FeatureFlag:
+      type: object
+      required: [key, enabled, version]
+      properties:
+        key: {type: string}
+        enabled: {type: boolean}
+        rule: {}
+        version: {type: integer, minimum: 0}
+    FeatureFlagUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled, expectedVersion, reason]
+      properties:
+        enabled: {type: boolean}
+        rule: {}
+        expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    FeatureFlagResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/FeatureFlag'}
+    FeatureFlagPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/FeatureFlag'}}
+    CategoryItem:
+      type: object
+      additionalProperties: false
+      required: [key, label, enabled]
+      properties:
+        key: {type: string, pattern: '^[a-z][a-z0-9_.-]{2,127}$'}
+        label: {type: string, minLength: 1, maxLength: 48}
+        enabled: {type: boolean}
+        coreRank: {type: [integer, 'null'], minimum: 1, maximum: 3}
+    CategoryConfigUpdate:
+      type: object
+      additionalProperties: false
+      required: [categories, expectedVersion, reason]
+      properties:
+        categories: {type: array, minItems: 1, maxItems: 50, items: {$ref: '#/components/schemas/CategoryItem'}}
+        expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    CategoryConfigResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [categories, version]
+          properties:
+            categories: {type: array, items: {$ref: '#/components/schemas/CategoryItem'}}
+            version: {type: integer, minimum: 0}
+    RecommendationItem:
+      type: object
+      additionalProperties: false
+      required: [targetType, targetId, rank]
+      properties:
+        targetType: {type: string, enum: [CONTENT, DEMAND]}
+        targetId: {$ref: '#/components/schemas/Uuid'}
+        rank: {type: integer, minimum: 1, maximum: 50}
+    RecommendationConfigUpdate:
+      type: object
+      additionalProperties: false
+      required: [items, expectedVersion, reason]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RecommendationItem'}}
+        expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    RecommendationConfigResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, version]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/RecommendationItem'}}
+            version: {type: integer, minimum: 0}
     AiSuggestionRequest:
       type: object
       additionalProperties: false
@@ -1280,6 +1796,157 @@ components:
             isSuggestion: {type: boolean, const: true}
             output: {type: [object, 'null']}
             version: {type: integer, minimum: 0}
+    AiSuggestionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/AiSuggestion'}
+    AiSuggestion:
+      type: object
+      required: [id, kind, targetType, targetId, targetVersionId, state, isSuggestion, output, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        kind: {type: string}
+        targetType: {type: string}
+        targetId: {$ref: '#/components/schemas/Uuid'}
+        targetVersionId: {$ref: '#/components/schemas/Uuid'}
+        state: {type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, ACCEPTED, EDITED, REJECTED]}
+        isSuggestion: {type: boolean, const: true}
+        output: {type: object}
+        version: {type: integer, minimum: 0}
+    OperationAuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/OperationAudit'}
+    OperationAudit:
+      type: object
+      required: [id, action, target, createdAt]
+      properties:
+        id: {type: integer, minimum: 1}
+        actorId: {type: [string, 'null'], format: uuid}
+        action: {type: string}
+        target: {type: object}
+        createdAt: {type: string, format: date-time}
+    ManagedTag:
+      type: object
+      required: [id, name, aliases, enabled, version]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        name: {type: string, minLength: 1, maxLength: 48}
+        aliases:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 48}
+        enabled: {type: boolean}
+        mergedIntoId: {type: [string, 'null'], format: uuid}
+        version: {type: integer, minimum: 0}
+    ManagedTagPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/ManagedTag'}}
+    ManagedTagCreate:
+      type: object
+      additionalProperties: false
+      required: [name, reason]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 48}
+        aliases: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 48}}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    ManagedTagUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled, aliases, expectedVersion, reason]
+      properties:
+        enabled: {type: boolean}
+        aliases: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 48}}
+        expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    ManagedTagMerge:
+      type: object
+      additionalProperties: false
+      required: [targetTagId, expectedSourceVersion, expectedTargetVersion, reason]
+      properties:
+        targetTagId: {$ref: '#/components/schemas/Uuid'}
+        expectedSourceVersion: {type: integer, minimum: 0}
+        expectedTargetVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    ManagedTagResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/ManagedTag'}
+    ManagedTagMergeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [source, target]
+          properties:
+            source: {$ref: '#/components/schemas/ManagedTag'}
+            target: {$ref: '#/components/schemas/ManagedTag'}
+    TagStatusBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled, items, reason]
+      properties:
+        enabled: {type: boolean}
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [tagId, expectedVersion]
+            properties:
+              tagId: {$ref: '#/components/schemas/Uuid'}
+              expectedVersion: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+    BatchJobItem:
+      type: object
+      required: [sequence, targetType, targetId, requestedVersion, status]
+      properties:
+        sequence: {type: integer, minimum: 1}
+        targetType: {type: string, enum: [TAG]}
+        targetId: {$ref: '#/components/schemas/Uuid'}
+        requestedVersion: {type: integer, minimum: 0}
+        status: {type: string, enum: [SUCCEEDED, FAILED]}
+        errorCode: {type: [string, 'null']}
+        resultVersion: {type: [integer, 'null'], minimum: 0}
+    BatchJob:
+      type: object
+      required: [id, operation, status, totalCount, successCount, failureCount, requestedBy, reason, createdAt, items]
+      properties:
+        id: {$ref: '#/components/schemas/Uuid'}
+        operation: {type: string, enum: [TAG_ENABLE, TAG_DISABLE]}
+        status: {type: string, enum: [RUNNING, SUCCEEDED, PARTIAL_FAILED, FAILED]}
+        totalCount: {type: integer, minimum: 1, maximum: 50}
+        successCount: {type: integer, minimum: 0}
+        failureCount: {type: integer, minimum: 0}
+        requestedBy: {$ref: '#/components/schemas/Uuid'}
+        reason: {type: string}
+        createdAt: {type: string, format: date-time}
+        items: {type: array, items: {$ref: '#/components/schemas/BatchJobItem'}}
+    BatchJobPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/BatchJob'}}
+    BatchJobResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: '#/components/schemas/BatchJob'}
     Problem:
       type: object
       additionalProperties: false

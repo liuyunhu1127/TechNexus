@@ -1,16 +1,21 @@
 package com.technexus.server.file.application;
 
+import com.technexus.common.domain.DomainException;
 import com.technexus.server.file.application.port.FileRecordPort;
 import com.technexus.server.file.application.port.MalwareScannerPort;
 import com.technexus.server.file.application.port.ObjectStoragePort;
 import java.time.Clock;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
 @Profile("!test")
+@ConditionalOnProperty(prefix = "technexus.file", name = "workers-enabled", havingValue = "true", matchIfMissing = true)
 public class FileScanWorker {
 	private static final int MAX_ATTEMPTS = 5;
 	private final FileRecordPort records;
@@ -43,24 +48,47 @@ public class FileScanWorker {
 			return false;
 		var file = candidate.get();
 		try {
-			var metadata = storage.inspect(file.objectKey());
+			storage.inspect(file.objectKey());
 			try (var content = storage.openContent(file.objectKey())) {
-				var result = scanner.scan(content);
+				var validated = FileContentPolicy.validateContent(content, file.objectKey(), file.declaredMime());
+				var digest = MessageDigest.getInstance("SHA-256");
+				var result = scanner.scan(new DigestInputStream(validated.stream(), digest));
+				if (!java.util.HexFormat.of().formatHex(digest.digest()).equals(file.sha256())) {
+					var quarantineKey = "quarantine/" + file.fileId();
+					storage.quarantine(file.objectKey(), quarantineKey);
+					records.markBlocked(file.fileId(), "FILE_HASH_MISMATCH:实际内容摘要与声明不一致", quarantineKey);
+					return true;
+				}
 				if (result.clean())
-					records.markAvailable(file.fileId(), metadata.contentType());
-				else
-					records.markBlocked(file.fileId(), "MALWARE:" + safe(result.signature()));
+					records.markAvailable(file.fileId(), validated.detectedMime());
+				else {
+					var quarantineKey = "quarantine/" + file.fileId();
+					storage.quarantine(file.objectKey(), quarantineKey);
+					records.markBlocked(file.fileId(), "MALWARE:" + safe(result.signature()), quarantineKey);
+				}
 			}
+		} catch (DomainException error) {
+			if (FileContentPolicy.isDeterministicRejection(error)) {
+				var quarantineKey = "quarantine/" + file.fileId();
+				storage.quarantine(file.objectKey(), quarantineKey);
+				records.markBlocked(file.fileId(), error.code() + ":" + safe(error.getMessage()), quarantineKey);
+				return true;
+			}
+			handleFailure(file, error);
 		} catch (Exception error) {
-			if (file.attempt() >= MAX_ATTEMPTS) {
-				records.markBlocked(file.fileId(), "SCAN_FAILED_FINAL:" + safe(error.getMessage()));
-			} else {
-				var delay = Math.min(3600, 30L << Math.min(file.attempt() - 1, 6));
-				records.markScanFailed(file.fileId(), file.attempt(), clock.instant().plusSeconds(delay),
-						safe(error.getMessage()));
-			}
+			handleFailure(file, error);
 		}
 		return true;
+	}
+
+	private void handleFailure(FileRecordPort.ScanCandidate file, Exception error) {
+		if (file.attempt() >= MAX_ATTEMPTS) {
+			records.markBlocked(file.fileId(), "SCAN_FAILED_FINAL:" + safe(error.getMessage()), file.objectKey());
+		} else {
+			var delay = Math.min(3600, 30L << Math.min(file.attempt() - 1, 6));
+			records.markScanFailed(file.fileId(), file.attempt(), clock.instant().plusSeconds(delay),
+					safe(error.getMessage()));
+		}
 	}
 
 	private static String safe(String value) {

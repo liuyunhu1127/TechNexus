@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,6 +45,11 @@ public class FileController {
 	@PostMapping("/{fileId}/download-url")
 	Map<String, Object> createFileDownloadUrl(Principal principal, @PathVariable UUID fileId) {
 		return Map.of("data", files.createDownload(RequestActor.require(principal), fileId));
+	}
+
+	@GetMapping("/{fileId}")
+	Map<String, Object> getFile(Principal principal, @PathVariable UUID fileId) {
+		return Map.of("data", files.get(RequestActor.require(principal), fileId));
 	}
 
 	record UploadRequest(@NotBlank @Size(max = 255) String fileName, @Min(1) @Max(104_857_600) long sizeBytes,

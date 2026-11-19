@@ -19,6 +19,17 @@ public class JdbcNotificationRepository implements NotificationRepository {
 		this.jdbc = jdbc;
 	}
 	@Override
+	public void add(NotificationView notification) {
+		jdbc.update(
+				"""
+						INSERT INTO tn_notification(public_id,recipient_id,notification_type,message,read_at,created_at,updated_at)
+						SELECT ?,id,?,?,?, ?,CURRENT_TIMESTAMP(6) FROM tn_user WHERE public_id=?
+						""",
+				bytes(notification.publicId()), notification.type(), notification.message(),
+				notification.readAt() == null ? null : Timestamp.from(notification.readAt()),
+				Timestamp.from(notification.createdAt()), bytes(notification.recipientId()));
+	}
+	@Override
 	public List<NotificationView> listFor(UUID recipientId, int limit) {
 		return jdbc.query("""
 				SELECT n.public_id,u.public_id recipient_public_id,n.notification_type,n.message,n.created_at,n.read_at

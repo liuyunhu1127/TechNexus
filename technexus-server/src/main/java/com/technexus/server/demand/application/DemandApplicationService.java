@@ -20,6 +20,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +54,17 @@ public class DemandApplicationService {
 		lineages.add(new Lineage(UuidV7.generate(), new TargetRef("CONTENT", contentId),
 				new TargetRef("DEMAND", result.id()), LineageType.PROBLEM_TO_DEMAND));
 		return result;
+	}
+
+	public void linkSolution(UUID demandId, UUID solutionContentId) {
+		require(demandId);
+		lineages.add(new Lineage(UuidV7.generate(), new TargetRef("DEMAND", demandId),
+				new TargetRef("SOLUTION", solutionContentId), LineageType.DEMAND_TO_SOLUTION));
+	}
+
+	public void linkKnowledge(UUID solutionContentId, UUID documentContentId) {
+		lineages.add(new Lineage(UuidV7.generate(), new TargetRef("SOLUTION", solutionContentId),
+				new TargetRef("KNOWLEDGE", documentContentId), LineageType.SOLUTION_TO_KNOWLEDGE));
 	}
 
 	@Transactional(readOnly = true)
@@ -119,7 +132,24 @@ public class DemandApplicationService {
 	@Transactional(readOnly = true)
 	public LineageView getLineage(String targetType, UUID targetId) {
 		var target = new TargetRef(targetType, targetId);
-		var connected = lineages.findConnected(target);
+		var connected = new java.util.ArrayList<Lineage>();
+		var queue = new ArrayDeque<TargetRef>();
+		var visited = new HashSet<TargetRef>();
+		var edgeIds = new HashSet<UUID>();
+		queue.add(target);
+		while (!queue.isEmpty()) {
+			var current = queue.removeFirst();
+			if (!visited.add(current))
+				continue;
+			for (var edge : lineages.findConnected(current)) {
+				if (edgeIds.add(edge.publicId()))
+					connected.add(edge);
+				if (!visited.contains(edge.source()))
+					queue.addLast(edge.source());
+				if (!visited.contains(edge.target()))
+					queue.addLast(edge.target());
+			}
+		}
 		var nodes = new LinkedHashMap<String, LineageNode>();
 		var edges = connected.stream().map(value -> {
 			nodes.putIfAbsent(value.source().type() + value.source().publicId(), node(value.source()));

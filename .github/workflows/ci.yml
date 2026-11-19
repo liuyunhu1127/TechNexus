@@ -54,13 +54,19 @@ jobs:
           mvn --settings .mvn/settings.xml --no-transfer-progress
           org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom
           -DskipTests -DoutputFormat=json -DoutputName=bom
-      - name: Scan backend SBOM and frontend lockfiles
-        uses: google/osv-scanner-action/osv-scanner-action@v2.6.0
+      - uses: actions/setup-node@v4
         with:
-          scan-args: |-
-            -L target/bom.json
-            -L technexus-web/package-lock.json
-            -L technexus-admin/package-lock.json
+          node-version: '22'
+      - name: Scan backend SBOM and frontend lockfiles
+        run: |
+          scanner="$RUNNER_TEMP/osv-scanner"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64 \
+            --output "$scanner"
+          echo "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  $scanner" | sha256sum -c -
+          chmod +x "$scanner"
+          node --test scripts/security/osv-gate.test.mjs
+          node scripts/security/osv-gate.mjs "$scanner"
 
   frontend:
     runs-on: ubuntu-latest

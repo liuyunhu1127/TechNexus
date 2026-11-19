@@ -10,12 +10,14 @@ import com.technexus.server.admin.infrastructure.InMemoryPriceObjectRepository;
 import com.technexus.server.content.application.ContentApplicationService;
 import com.technexus.server.content.infrastructure.InMemoryArticleRepository;
 import com.technexus.server.content.infrastructure.InMemoryPostRepository;
+import com.technexus.server.content.infrastructure.InMemoryContentAssociationAdapter;
 import com.technexus.server.demand.application.DemandApplicationService;
 import com.technexus.server.demand.infrastructure.InMemoryDemandRepository;
 import com.technexus.server.demand.infrastructure.InMemoryLineageRepository;
 import com.technexus.server.demand.infrastructure.InMemoryProposalRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +45,7 @@ class AdminApplicationServiceTest {
 	@Test
 	void humanDecisionClaimsPendingTaskAndPublishesBoundContentVersion() {
 		var owner = UUID.randomUUID();
-		var content = new ContentApplicationService(articles, posts, audits);
+		var content = new ContentApplicationService(articles, posts, audits, new InMemoryContentAssociationAdapter());
 		var created = content.create(owner,
 				new ContentApplicationService.ContentCommand("DOCUMENT", "PUBLIC", "Title", "Summary", "Body"));
 		var submitted = content.submit(created.id(), owner, created.version());
@@ -96,7 +98,7 @@ class AdminApplicationServiceTest {
 	@Test
 	void staleAuditTargetVersionDoesNotFinalizeTask() {
 		var owner = UUID.randomUUID();
-		var content = new ContentApplicationService(articles, posts, audits);
+		var content = new ContentApplicationService(articles, posts, audits, new InMemoryContentAssociationAdapter());
 		var created = content.create(owner,
 				new ContentApplicationService.ContentCommand("DOCUMENT", "PUBLIC", "Title", "Summary", "Body"));
 		var submitted = content.submit(created.id(), owner, created.version());
@@ -144,11 +146,63 @@ class AdminApplicationServiceTest {
 	}
 
 	@Test
+	void featureFlagUpdateIsVersionedAndListed() {
+		var actor = UUID.randomUUID();
+		var created = service.updateFeatureFlag("registration.enabled", actor,
+				new AdminApplicationService.FeatureFlagCommand(true, Map.of("percentage", 25), 0, "alpha rollout"));
+		assertEquals(1, created.version());
+		assertEquals(1, service.listFeatureFlags().size());
+		assertEquals(25, ((Map<?, ?>) service.getFeatureFlag("registration.enabled").rule()).get("percentage"));
+		assertThrows(DomainException.class, () -> service.updateFeatureFlag("registration.enabled", actor,
+				new AdminApplicationService.FeatureFlagCommand(false, Map.of(), 0, "stale")));
+	}
+
+	@Test
 	void aiTaskIsExplicitlyQueuedAndCannotBeDecidedBeforeOutputExists() {
 		var created = service.createAiSuggestion(new AdminApplicationService.AiSuggestionCommand("SUMMARY", "CONTENT",
 				UUID.randomUUID(), UUID.randomUUID()));
 		assertEquals("QUEUED", created.state());
 		assertThrows(DomainException.class, () -> service.decideAiSuggestion(created.id(), UUID.randomUUID(),
 				new AdminApplicationService.AiDecisionCommand("ACCEPT", Map.of(), 0)));
+		assertEquals(created.id(), service.listAiSuggestions("QUEUED").getFirst().id());
+	}
+
+	@Test
+	void operationAuditCanBeFilteredAfterVersionedChange() {
+		var actor = UUID.randomUUID();
+		service.updateFeatureFlag("content.ai.enabled", actor,
+				new AdminApplicationService.FeatureFlagCommand(true, Map.of(), 0, "enable"));
+
+		var audits = service.listOperationAudits("FEATURE_FLAG_UPDATE");
+
+		assertEquals(1, audits.size());
+		assertEquals(actor, audits.getFirst().actorId());
+		assertEquals("content.ai.enabled", audits.getFirst().target().get("key"));
+		assertThrows(DomainException.class, () -> service.listOperationAudits("bad action"));
+	}
+
+	@Test
+	void categoryAndRecommendationConfigsEnforceProductRules() {
+		var actor = UUID.randomUUID();
+		var categories = service.getCategoryConfig();
+		assertEquals(3, categories.categories().size());
+		var savedCategories = service.updateCategoryConfig(actor,
+				new AdminApplicationService.CategoryConfigCommand(categories.categories(), 0, "baseline directions"));
+		assertEquals(1, savedCategories.version());
+		assertThrows(DomainException.class,
+				() -> service.updateCategoryConfig(actor, new AdminApplicationService.CategoryConfigCommand(
+						List.of(new AdminApplicationService.CategoryItem("only.one", "Only", true, 1)), 1, "invalid")));
+
+		var target = UUID.randomUUID();
+		var recommendations = service.updateRecommendationConfig(actor,
+				new AdminApplicationService.RecommendationConfigCommand(
+						List.of(new AdminApplicationService.RecommendationItem("CONTENT", target, 1)), 0, "pin"));
+		assertEquals(target, recommendations.items().getFirst().targetId());
+		assertThrows(DomainException.class,
+				() -> service.updateRecommendationConfig(actor,
+						new AdminApplicationService.RecommendationConfigCommand(
+								List.of(new AdminApplicationService.RecommendationItem("CONTENT", target, 1),
+										new AdminApplicationService.RecommendationItem("DEMAND", UUID.randomUUID(), 1)),
+								1, "duplicate rank")));
 	}
 }

@@ -1,5 +1,6 @@
 package com.technexus.server.auth;
 
+import com.technexus.server.admin.application.FeatureFlagEvaluator;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -25,14 +26,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 	private static final String REFRESH_COOKIE = "tn_refresh";
 	private final AuthApplicationService auth;
+	private final FeatureFlagEvaluator flags;
 
-	public AuthController(AuthApplicationService auth) {
+	public AuthController(AuthApplicationService auth, FeatureFlagEvaluator flags) {
 		this.auth = auth;
+		this.flags = flags;
 	}
 
 	@PostMapping("/register")
 	@ResponseStatus(HttpStatus.CREATED)
 	ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
+		flags.requireEnabled("registration.enabled", request.email().trim().toLowerCase(java.util.Locale.ROOT));
 		var account = auth.register(request.email(), request.password(), request.displayName());
 		return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", Map.of("id", account.publicId(), "status",
 				"ACTIVE", "displayName", account.displayName(), "bio", "", "version", account.sessionVersion())));

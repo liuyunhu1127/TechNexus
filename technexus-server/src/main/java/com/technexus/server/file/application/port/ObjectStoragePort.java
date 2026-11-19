@@ -10,6 +10,9 @@ public interface ObjectStoragePort {
 	ObjectMetadata inspect(String objectKey);
 	InputStream openContent(String objectKey);
 	PresignedDownload presignDownload(String objectKey);
+	void quarantine(String sourceKey, String quarantineKey);
+	default void delete(String objectKey) {
+	}
 
 	record PresignedUpload(URI url, Map<String, String> requiredHeaders, Instant expiresAt) {
 	}

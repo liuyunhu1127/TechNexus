@@ -36,11 +36,12 @@ public class CookieMutationGuardFilter extends OncePerRequestFilter {
 		var origin = request.getHeader("Origin");
 		var headerToken = request.getHeader("X-CSRF-Token");
 		var cookieToken = cookie(request, "tn_csrf");
-		if (!allowedOrigins.contains(origin) || !constantTimeEquals(headerToken, cookieToken)) {
+		if (origin == null || !allowedOrigins.contains(origin) || !constantTimeEquals(headerToken, cookieToken)) {
 			response.setStatus(HttpServletResponse.SC_FORBIDDEN);
 			response.setContentType("application/problem+json;charset=UTF-8");
 			response.getWriter().write(
 					"{\"type\":\"about:blank\",\"title\":\"请求来源或 CSRF 令牌无效\",\"status\":403,\"code\":\"CSRF_INVALID\"}");
+			response.flushBuffer();
 			return;
 		}
 		chain.doFilter(request, response);

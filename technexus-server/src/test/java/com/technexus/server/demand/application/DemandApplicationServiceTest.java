@@ -77,6 +77,21 @@ class DemandApplicationServiceTest {
 	}
 
 	@Test
+	void returnsTransitiveProblemDemandSolutionKnowledgeLineage() {
+		var problem = UUID.randomUUID();
+		var demand = service.createFromContent(problem, owner, command("PUBLIC"));
+		var solution = UUID.randomUUID();
+		var knowledge = UUID.randomUUID();
+		service.linkSolution(demand.id(), solution);
+		service.linkKnowledge(solution, knowledge);
+
+		var graph = service.getLineage("CONTENT", problem);
+		assertEquals(4, graph.nodes().size());
+		assertEquals(List.of("PROBLEM_TO_DEMAND", "DEMAND_TO_SOLUTION", "SOLUTION_TO_KNOWLEDGE"),
+				graph.edges().stream().map(DemandApplicationService.LineageEdge::type).toList());
+	}
+
+	@Test
 	void acceptedProviderCanDeliverConfirmedDemand() {
 		var demandRepository = new InMemoryDemandRepository();
 		var proposalRepository = new InMemoryProposalRepository();

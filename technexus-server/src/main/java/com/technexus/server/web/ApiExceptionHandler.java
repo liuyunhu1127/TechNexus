@@ -22,6 +22,7 @@ public class ApiExceptionHandler {
 				HttpStatus.FORBIDDEN;
 			case "EMAIL_EXISTS", "VERSION_CONFLICT" -> HttpStatus.CONFLICT;
 			case "AUTH_RATE_LIMITED" -> HttpStatus.TOO_MANY_REQUESTS;
+			case "OBJECT_STORAGE_UNAVAILABLE", "FILE_SCAN_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		return problem(status, error.code(), error.getMessage(), request);

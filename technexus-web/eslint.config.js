@@ -18,11 +18,29 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/**/*.mjs'],
     languageOptions: {
       globals: {
+        AbortSignal: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        WebSocket: 'readonly',
+      },
+    },
+  },
+  {
+    languageOptions: {
+      globals: {
+        computed: 'readonly',
+        crypto: 'readonly',
+        defineNuxtPlugin: 'readonly',
         defineNuxtConfig: 'readonly',
+        Event: 'readonly',
+        File: 'readonly',
+        HTMLInputElement: 'readonly',
         navigateTo: 'readonly',
         process: 'readonly',
+        reactive: 'readonly',
 		ref: 'readonly',
         useCookie: 'readonly',
 		useApi: 'readonly',

@@ -1,6 +1,7 @@
 package com.technexus.server.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -32,11 +33,25 @@ class CookieMutationGuardFilterTest {
 
 		assertEquals(403, response.getStatus());
 		assertEquals("application/problem+json;charset=UTF-8", response.getContentType());
+		assertTrue(response.isCommitted());
+		assertTrue(response.getContentAsString().contains("\"code\":\"CSRF_INVALID\""));
+	}
+
+	@Test
+	void rejectsRefreshWhenOriginIsMissingWithoutThrowing() throws Exception {
+		var request = request(null, "same-token", "same-token");
+		var response = new MockHttpServletResponse();
+
+		filter.doFilter(request, response, new MockFilterChain());
+
+		assertEquals(403, response.getStatus());
+		assertTrue(response.isCommitted());
 	}
 
 	private static MockHttpServletRequest request(String origin, String header, String cookie) {
 		var request = new MockHttpServletRequest("POST", "/api/v1/auth/refresh");
-		request.addHeader("Origin", origin);
+		if (origin != null)
+			request.addHeader("Origin", origin);
 		request.addHeader("X-CSRF-Token", header);
 		request.setCookies(new Cookie("tn_csrf", cookie));
 		return request;

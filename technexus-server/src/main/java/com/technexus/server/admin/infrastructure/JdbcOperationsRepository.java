@@ -6,6 +6,7 @@ import com.technexus.common.domain.DomainException;
 import com.technexus.server.admin.application.port.OperationsRepository;
 import java.nio.ByteBuffer;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -64,6 +65,49 @@ public class JdbcOperationsRepository implements OperationsRepository {
 	}
 
 	@Override
+	public List<FeatureFlagRecord> listFeatureFlags() {
+		return jdbc.query("SELECT flag_key,enabled,rule_json,version FROM tn_feature_flag ORDER BY flag_key",
+				(result, row) -> new FeatureFlagRecord(result.getString("flag_key"), result.getBoolean("enabled"),
+						readObject(result.getString("rule_json")), result.getLong("version")));
+	}
+
+	@Override
+	public Optional<FeatureFlagRecord> findFeatureFlag(String key) {
+		return jdbc.query("SELECT flag_key,enabled,rule_json,version FROM tn_feature_flag WHERE flag_key=?",
+				(result, row) -> new FeatureFlagRecord(result.getString("flag_key"), result.getBoolean("enabled"),
+						readObject(result.getString("rule_json")), result.getLong("version")),
+				key).stream().findFirst();
+	}
+
+	@Override
+	public FeatureFlagRecord saveFeatureFlag(String key, boolean enabled, Object rule, long expectedVersion,
+			UUID actorId, String reason) {
+		return transactions.execute(status -> {
+			var current = findFeatureFlag(key);
+			var encoded = rule == null ? null : write(rule);
+			if (current.isEmpty()) {
+				if (expectedVersion != 0)
+					throw new DomainException("VERSION_CONFLICT", "Feature Flag 版本已变化");
+				jdbc.update("""
+						INSERT INTO tn_feature_flag(flag_key,enabled,rule_json,version,created_at,updated_at)
+						VALUES (?,?,?,1,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6))
+						""", key, enabled, encoded);
+			} else {
+				var changed = jdbc.update(
+						"""
+								UPDATE tn_feature_flag SET enabled=?,rule_json=?,version=version+1,updated_at=CURRENT_TIMESTAMP(6)
+								WHERE flag_key=? AND version=?
+								""",
+						enabled, encoded, key, expectedVersion);
+				if (changed != 1)
+					throw new DomainException("VERSION_CONFLICT", "Feature Flag 版本已变化");
+			}
+			audit(actorId, "FEATURE_FLAG_UPDATE", Map.of("key", key, "enabled", enabled, "reason", reason));
+			return findFeatureFlag(key).orElseThrow();
+		});
+	}
+
+	@Override
 	public AiSuggestionRecord addSuggestion(AiSuggestionRecord value) {
 		var changed = jdbc.update("""
 				INSERT INTO tn_ai_suggestion(public_id,kind,target_type,target_public_id,target_version_id,suggestion,
@@ -87,6 +131,23 @@ public class JdbcOperationsRepository implements OperationsRepository {
 						uuid(result.getBytes("target_version_id")), result.getString("state"), true,
 						readMap(result.getString("output_json")), result.getLong("version")),
 				bytes(id)).stream().findFirst();
+	}
+
+	@Override
+	public List<AiSuggestionRecord> listSuggestions(String state, int limit) {
+		var select = """
+				SELECT public_id,kind,target_type,target_public_id,target_version_id,state,output_json,version
+				FROM tn_ai_suggestion
+				""";
+		var mapper = (org.springframework.jdbc.core.RowMapper<AiSuggestionRecord>) (result,
+				row) -> new AiSuggestionRecord(uuid(result.getBytes("public_id")), result.getString("kind"),
+						result.getString("target_type"), uuid(result.getBytes("target_public_id")),
+						uuid(result.getBytes("target_version_id")), result.getString("state"), true,
+						readMap(result.getString("output_json")), result.getLong("version"));
+		if (state == null)
+			return jdbc.query(select + " ORDER BY created_at DESC,public_id DESC LIMIT ?", mapper, limit);
+		return jdbc.query(select + " WHERE state=? ORDER BY created_at DESC,public_id DESC LIMIT ?", mapper, state,
+				limit);
 	}
 
 	@Override
@@ -174,6 +235,22 @@ public class JdbcOperationsRepository implements OperationsRepository {
 	}
 
 	@Override
+	public List<OperationAuditRecord> listOperationAudits(String action, int limit) {
+		var select = """
+				SELECT a.id,u.public_id AS actor_public_id,a.action,a.target,a.created_at
+				FROM tn_operation_audit a LEFT JOIN tn_user u ON u.id=a.actor_id
+				""";
+		var mapper = (org.springframework.jdbc.core.RowMapper<OperationAuditRecord>) (result,
+				row) -> new OperationAuditRecord(result.getLong("id"), nullableUuid(result.getBytes("actor_public_id")),
+						result.getString("action"), readMap(result.getString("target")),
+						result.getTimestamp("created_at").toInstant());
+		if (action == null)
+			return jdbc.query(select + " ORDER BY a.created_at DESC,a.id DESC LIMIT ?", mapper, limit);
+		return jdbc.query(select + " WHERE a.action=? ORDER BY a.created_at DESC,a.id DESC LIMIT ?", mapper, action,
+				limit);
+	}
+
+	@Override
 	public DashboardRecord dashboard() {
 		var pendingAudit = jdbc.queryForObject(
 				"SELECT COUNT(*) FROM tn_audit_task WHERE state IN ('CREATED','PENDING','PROCESSING')", Long.class);
@@ -198,6 +275,8 @@ public class JdbcOperationsRepository implements OperationsRepository {
 	}
 
 	private Object readObject(String value) {
+		if (value == null)
+			return null;
 		try {
 			return json.readValue(value, Object.class);
 		} catch (Exception error) {
@@ -231,5 +310,8 @@ public class JdbcOperationsRepository implements OperationsRepository {
 	private static UUID uuid(byte[] value) {
 		var buffer = ByteBuffer.wrap(value);
 		return new UUID(buffer.getLong(), buffer.getLong());
+	}
+	private static UUID nullableUuid(byte[] value) {
+		return value == null ? null : uuid(value);
 	}
 }

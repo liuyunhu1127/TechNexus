@@ -1,0 +1,101 @@
+groups:
+  - name: technexus-application
+    interval: 30s
+    rules:
+      - alert: TechNexusTargetMissing
+        expr: absent(up{job="technexus-server"})
+        for: 2m
+        labels:
+          severity: critical
+          service: technexus-server
+        annotations:
+          summary: TechNexus Prometheus target is missing
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#target-missing
+
+      - alert: TechNexusInstanceDown
+        expr: up{job="technexus-server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: technexus-server
+        annotations:
+          summary: TechNexus instance is not scrapeable
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#instance-down
+
+      - alert: TechNexusDatabaseDown
+        expr: min_over_time(technexus_database_up[1m]) < 1
+        for: 1m
+        labels:
+          severity: critical
+          service: technexus-server
+        annotations:
+          summary: TechNexus cannot reach MySQL
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#database-down
+
+      - alert: TechNexusOperationalMetricsStale
+        expr: time() - technexus_observability_last_success_epoch_seconds > 60
+        for: 2m
+        labels:
+          severity: warning
+          service: technexus-server
+        annotations:
+          summary: TechNexus operational metrics collection is stale
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#metrics-stale
+
+      - alert: TechNexusHttpServerErrors
+        expr: >-
+          sum(rate(http_server_requests_seconds_count{job="technexus-server",status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{job="technexus-server"}[5m])), 0.001)
+          >= 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: technexus-server
+        annotations:
+          summary: TechNexus HTTP 5xx ratio is at least 1% for five minutes
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#http-5xx
+
+      - alert: TechNexusHikariPendingConnections
+        expr: max_over_time(hikaricp_connections_pending{job="technexus-server"}[2m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: technexus-server
+        annotations:
+          summary: TechNexus requests are waiting for a database connection
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#hikari-pending
+
+      - alert: TechNexusJvmHeapHigh
+        expr: >-
+          sum(jvm_memory_used_bytes{job="technexus-server",area="heap"})
+          /
+          clamp_min(sum(jvm_memory_max_bytes{job="technexus-server",area="heap"}), 1)
+          >= 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: technexus-server
+        annotations:
+          summary: TechNexus JVM heap usage is at least 85%
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#jvm-heap
+
+      - alert: TechNexusDurableQueueFailures
+        expr: sum by (queue) (technexus_queue_depth{state=~"FAILED|PARTIAL_FAILED|BLOCKED"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: technexus-server
+        annotations:
+          summary: "TechNexus durable queue {{ $labels.queue }} contains failed items"
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#queue-failures
+
+      - alert: TechNexusDurableQueueBacklog
+        expr: sum by (queue) (technexus_queue_depth{state=~"NEW|QUEUED|RUNNING|SCANNING|CREATED|REUSED|CLEANING"}) > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: technexus-server
+        annotations:
+          summary: "TechNexus durable queue {{ $labels.queue }} backlog exceeds 100"
+          runbook: docs/technexus-solution-closure/04-测试阶段/可观测性与告警运行手册.md#queue-backlog

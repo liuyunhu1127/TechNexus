@@ -36,6 +36,11 @@ coverage/
 *.log
 
 # =========================
+# Local test evidence and runtime outputs
+# =========================
+artifacts/
+
+# =========================
 # OS
 # =========================
 .DS_Store

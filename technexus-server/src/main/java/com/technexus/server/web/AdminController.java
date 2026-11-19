@@ -2,6 +2,9 @@ package com.technexus.server.web;
 
 import com.technexus.common.domain.DomainException;
 import com.technexus.server.admin.application.AdminApplicationService;
+import com.technexus.server.admin.application.BatchApplicationService;
+import com.technexus.server.admin.application.FeatureFlagEvaluator;
+import com.technexus.server.community.application.CommunityApplicationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -28,9 +31,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin")
 public class AdminController {
 	private final AdminApplicationService admin;
+	private final CommunityApplicationService community;
+	private final BatchApplicationService batches;
+	private final FeatureFlagEvaluator flags;
 
-	public AdminController(AdminApplicationService admin) {
+	public AdminController(AdminApplicationService admin, CommunityApplicationService community,
+			BatchApplicationService batches, FeatureFlagEvaluator flags) {
 		this.admin = admin;
+		this.community = community;
+		this.batches = batches;
+		this.flags = flags;
 	}
 
 	@GetMapping("/audit-tasks")
@@ -67,16 +77,100 @@ public class AdminController {
 		return Map.of("data", admin.updateConfig(key, RequestActor.require(principal), input.command()));
 	}
 
+	@GetMapping("/category-config")
+	Map<String, Object> getCategoryConfig() {
+		return Map.of("data", admin.getCategoryConfig());
+	}
+
+	@PutMapping("/category-config")
+	Map<String, Object> updateCategoryConfig(Principal principal, @Valid @RequestBody CategoryConfigUpdate input) {
+		return Map.of("data", admin.updateCategoryConfig(RequestActor.require(principal), input.command()));
+	}
+
+	@GetMapping("/recommendation-config")
+	Map<String, Object> getRecommendationConfig() {
+		return Map.of("data", admin.getRecommendationConfig());
+	}
+
+	@PutMapping("/recommendation-config")
+	Map<String, Object> updateRecommendationConfig(Principal principal,
+			@Valid @RequestBody RecommendationConfigUpdate input) {
+		return Map.of("data", admin.updateRecommendationConfig(RequestActor.require(principal), input.command()));
+	}
+
+	@GetMapping("/feature-flags")
+	Map<String, Object> listFeatureFlags() {
+		return Map.of("items", admin.listFeatureFlags());
+	}
+
+	@GetMapping("/feature-flags/{key}")
+	Map<String, Object> getFeatureFlag(@PathVariable String key) {
+		return Map.of("data", admin.getFeatureFlag(key));
+	}
+
+	@PutMapping("/feature-flags/{key}")
+	Map<String, Object> updateFeatureFlag(Principal principal, @PathVariable String key,
+			@Valid @RequestBody FeatureFlagUpdate input) {
+		return Map.of("data", admin.updateFeatureFlag(key, RequestActor.require(principal), input.command()));
+	}
+
 	@PostMapping("/ai-suggestions")
 	@ResponseStatus(HttpStatus.ACCEPTED)
-	Map<String, Object> createAiSuggestion(@Valid @RequestBody AiSuggestionRequest input) {
+	Map<String, Object> createAiSuggestion(Principal principal, @Valid @RequestBody AiSuggestionRequest input) {
+		flags.requireEnabled("ai.enabled", RequestActor.require(principal).toString());
 		return Map.of("data", admin.createAiSuggestion(input.command()));
+	}
+
+	@GetMapping("/ai-suggestions")
+	Map<String, Object> listAiSuggestions(@RequestParam(required = false) String state) {
+		return Map.of("items", admin.listAiSuggestions(state));
 	}
 
 	@PostMapping("/ai-suggestions/{suggestionId}/decisions")
 	Map<String, Object> decideAiSuggestion(Principal principal, @PathVariable UUID suggestionId,
 			@Valid @RequestBody AiSuggestionDecision input) {
 		return Map.of("data", admin.decideAiSuggestion(suggestionId, RequestActor.require(principal), input.command()));
+	}
+
+	@GetMapping("/operation-audits")
+	Map<String, Object> listOperationAudits(@RequestParam(required = false) String action) {
+		return Map.of("items", admin.listOperationAudits(action));
+	}
+
+	@GetMapping("/tags")
+	Map<String, Object> listTags() {
+		return Map.of("items", community.listTags());
+	}
+
+	@PostMapping("/tags")
+	@ResponseStatus(HttpStatus.CREATED)
+	Map<String, Object> createTag(Principal principal, @Valid @RequestBody TagCreate input) {
+		return Map.of("data", community.createTag(RequestActor.require(principal), input.command()));
+	}
+
+	@PutMapping("/tags/{tagId}")
+	Map<String, Object> updateTag(Principal principal, @PathVariable UUID tagId, @Valid @RequestBody TagUpdate input) {
+		return Map.of("data", community.updateTag(tagId, RequestActor.require(principal), input.command()));
+	}
+
+	@PostMapping("/tags/{tagId}/merges")
+	Map<String, Object> mergeTag(Principal principal, @PathVariable UUID tagId, @Valid @RequestBody TagMerge input) {
+		return Map.of("data", community.mergeTag(tagId, RequestActor.require(principal), input.command()));
+	}
+
+	@GetMapping("/batches")
+	Map<String, Object> listBatches() {
+		return Map.of("items", batches.listBatches());
+	}
+
+	@GetMapping("/batches/{batchId}")
+	Map<String, Object> getBatch(@PathVariable UUID batchId) {
+		return Map.of("data", batches.getBatch(batchId));
+	}
+
+	@PostMapping("/tag-batches")
+	Map<String, Object> executeTagStatusBatch(Principal principal, @Valid @RequestBody TagStatusBatch input) {
+		return Map.of("data", batches.executeTagStatusBatch(RequestActor.require(principal), input.command()));
 	}
 
 	record AuditDecision(@NotBlank @Pattern(regexp = "APPROVED|REJECTED") String decision,
@@ -113,6 +207,40 @@ public class AdminController {
 		}
 	}
 
+	record FeatureFlagUpdate(boolean enabled, Object rule, @Min(0) long expectedVersion,
+			@NotBlank @Size(max = 1000) String reason) {
+		AdminApplicationService.FeatureFlagCommand command() {
+			return new AdminApplicationService.FeatureFlagCommand(enabled, rule, expectedVersion, reason);
+		}
+	}
+
+	record CategoryItemInput(@NotBlank @Size(max = 48) String key, @NotBlank @Size(max = 48) String label,
+			boolean enabled, @Min(1) Integer coreRank) {
+		AdminApplicationService.CategoryItem item() {
+			return new AdminApplicationService.CategoryItem(key, label, enabled, coreRank);
+		}
+	}
+	record CategoryConfigUpdate(@NotNull @Size(min = 1, max = 50) java.util.List<@Valid CategoryItemInput> categories,
+			@Min(0) long expectedVersion, @NotBlank @Size(max = 1000) String reason) {
+		AdminApplicationService.CategoryConfigCommand command() {
+			return new AdminApplicationService.CategoryConfigCommand(
+					categories.stream().map(CategoryItemInput::item).toList(), expectedVersion, reason);
+		}
+	}
+	record RecommendationItemInput(@NotBlank @Pattern(regexp = "CONTENT|DEMAND") String targetType,
+			@NotNull UUID targetId, @Min(1) int rank) {
+		AdminApplicationService.RecommendationItem item() {
+			return new AdminApplicationService.RecommendationItem(targetType, targetId, rank);
+		}
+	}
+	record RecommendationConfigUpdate(@NotNull @Size(max = 50) java.util.List<@Valid RecommendationItemInput> items,
+			@Min(0) long expectedVersion, @NotBlank @Size(max = 1000) String reason) {
+		AdminApplicationService.RecommendationConfigCommand command() {
+			return new AdminApplicationService.RecommendationConfigCommand(
+					items.stream().map(RecommendationItemInput::item).toList(), expectedVersion, reason);
+		}
+	}
+
 	record AiSuggestionRequest(
 			@NotBlank @Pattern(regexp = "TAGS|SUMMARY|CATEGORY|DEMAND_STRUCTURE|AUDIT_REASON") String kind,
 			@NotBlank @Pattern(regexp = "CONTENT|DEMAND|AUDIT_TASK") String targetType, @NotNull UUID targetId,
@@ -126,6 +254,45 @@ public class AdminController {
 			Map<String, Object> editedOutput, @Min(0) long expectedVersion) {
 		AdminApplicationService.AiDecisionCommand command() {
 			return new AdminApplicationService.AiDecisionCommand(decision, editedOutput, expectedVersion);
+		}
+	}
+
+	record TagCreate(@NotBlank @Size(max = 48) String name,
+			@Size(max = 20) java.util.List<@NotBlank @Size(max = 48) String> aliases,
+			@NotBlank @Size(max = 1000) String reason) {
+		CommunityApplicationService.TagCreateCommand command() {
+			return new CommunityApplicationService.TagCreateCommand(name,
+					aliases == null ? java.util.List.of() : aliases, reason);
+		}
+	}
+
+	record TagUpdate(boolean enabled, @Size(max = 20) java.util.List<@NotBlank @Size(max = 48) String> aliases,
+			@Min(0) long expectedVersion, @NotBlank @Size(max = 1000) String reason) {
+		CommunityApplicationService.TagUpdateCommand command() {
+			return new CommunityApplicationService.TagUpdateCommand(enabled,
+					aliases == null ? java.util.List.of() : aliases, expectedVersion, reason);
+		}
+	}
+
+	record TagMerge(@NotNull UUID targetTagId, @Min(0) long expectedSourceVersion, @Min(0) long expectedTargetVersion,
+			@NotBlank @Size(max = 1000) String reason) {
+		CommunityApplicationService.TagMergeCommand command() {
+			return new CommunityApplicationService.TagMergeCommand(targetTagId, expectedSourceVersion,
+					expectedTargetVersion, reason);
+		}
+	}
+
+	record TagStatusItemInput(@NotNull UUID tagId, @Min(0) long expectedVersion) {
+		BatchApplicationService.TagStatusItem item() {
+			return new BatchApplicationService.TagStatusItem(tagId, expectedVersion);
+		}
+	}
+	record TagStatusBatch(boolean enabled,
+			@NotNull @Size(min = 1, max = 50) java.util.List<@Valid TagStatusItemInput> items,
+			@NotBlank @Size(max = 1000) String reason) {
+		BatchApplicationService.TagStatusBatchCommand command() {
+			return new BatchApplicationService.TagStatusBatchCommand(enabled,
+					items.stream().map(TagStatusItemInput::item).toList(), reason);
 		}
 	}
 }

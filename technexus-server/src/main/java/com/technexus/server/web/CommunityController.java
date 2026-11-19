@@ -1,6 +1,8 @@
 package com.technexus.server.web;
 
 import com.technexus.server.community.application.CommunityApplicationService;
+import com.technexus.server.community.application.SearchApplicationService;
+import com.technexus.server.community.application.DiscoveryApplicationService;
 import com.technexus.server.content.application.ContentApplicationService;
 import jakarta.validation.constraints.Size;
 import java.security.Principal;
@@ -22,14 +24,31 @@ import org.springframework.web.bind.annotation.RestController;
 public class CommunityController {
 	private final ContentApplicationService contents;
 	private final CommunityApplicationService community;
-	public CommunityController(ContentApplicationService contents, CommunityApplicationService community) {
+	private final SearchApplicationService search;
+	private final DiscoveryApplicationService discovery;
+	public CommunityController(ContentApplicationService contents, CommunityApplicationService community,
+			SearchApplicationService search, DiscoveryApplicationService discovery) {
 		this.contents = contents;
 		this.community = community;
+		this.search = search;
+		this.discovery = discovery;
+	}
+
+	@GetMapping("/recommendations")
+	Map<String, Object> recommendations(@RequestParam(defaultValue = "20") int limit) {
+		return Map.of("items", discovery.recommendations(limit));
 	}
 
 	@GetMapping("/search")
-	Map<String, Object> search(@RequestParam(defaultValue = "") @Size(max = 200) String q) {
-		return Map.of("items", contents.searchPublic(q));
+	SearchApplicationService.SearchPage search(@RequestParam(defaultValue = "") @Size(max = 200) String q,
+			@RequestParam(defaultValue = "ALL") String type, @RequestParam(defaultValue = "RELEVANCE") String sort,
+			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+		return search.search(q, type, sort, page, size);
+	}
+
+	@GetMapping("/tags")
+	Map<String, Object> listTags() {
+		return Map.of("items", contents.listTags());
 	}
 
 	@GetMapping("/notifications")

@@ -26,6 +26,8 @@ public class FileApplicationService {
 		if (!"IMAGE".equals(command.purpose()) && !"ATTACHMENT".equals(command.purpose())) {
 			throw new DomainException("FILE_PURPOSE_INVALID", "文件用途无效");
 		}
+		FileContentPolicy.validateDeclared(command.fileName(), command.sizeBytes(), command.declaredMime(),
+				command.purpose());
 		var uploadId = UuidV7.generate();
 		var fileId = UuidV7.generate();
 		var safeName = command.fileName().replaceAll("[^a-zA-Z0-9._-]", "_");
@@ -34,11 +36,11 @@ public class FileApplicationService {
 		var objectKey = "uploads/" + ownerId + "/" + fileId + "/" + safeName;
 		new FileObject(fileId, command.sha256(), command.sizeBytes(), objectKey);
 		var expiry = clock.instant().plusSeconds(900);
-		records.begin(new FileRecordPort.UploadRecord(uploadId, fileId, ownerId, objectKey, command.sha256(),
-				command.sizeBytes(), command.declaredMime(), expiry));
-		var signed = storage.presignUpload(objectKey, command.declaredMime(), command.sha256());
-		return new UploadResult(uploadId, fileId, "UPLOADING", signed.url().toString(), signed.requiredHeaders(),
-				signed.expiresAt());
+		var upload = records.begin(new FileRecordPort.UploadRecord(uploadId, fileId, ownerId, objectKey,
+				command.sha256(), command.sizeBytes(), command.declaredMime(), expiry));
+		var signed = storage.presignUpload(upload.objectKey(), command.declaredMime(), command.sha256());
+		return new UploadResult(upload.uploadId(), upload.fileId(), "UPLOADING", signed.url().toString(),
+				signed.requiredHeaders(), signed.expiresAt());
 	}
 
 	public FileResult complete(UUID ownerId, UUID uploadId) {
@@ -52,17 +54,26 @@ public class FileApplicationService {
 			throw new DomainException("FILE_MIME_MISMATCH", "对象 MIME 与声明不一致");
 		if (!matchesHash(upload.sha256(), metadata.sha256()))
 			throw new DomainException("FILE_HASH_MISMATCH", "对象摘要与声明不一致");
-		var aggregate = new FileObject(upload.fileId(), upload.sha256(), upload.sizeBytes(), upload.objectKey());
-		aggregate.uploaded();
-		aggregate.scanning();
-		records.markScanning(uploadId, ownerId);
-		return new FileResult(upload.fileId(), "SCANNING");
+		if (!upload.reused()) {
+			var aggregate = new FileObject(upload.fileId(), upload.sha256(), upload.sizeBytes(), upload.objectKey());
+			aggregate.uploaded();
+			aggregate.scanning();
+		}
+		if (upload.reused())
+			storage.delete(upload.objectKey());
+		var state = records.markScanning(uploadId, ownerId);
+		return new FileResult(upload.fileId(), state);
 	}
 
 	public DownloadResult createDownload(UUID actorId, UUID fileId) {
 		var file = records.requireDownloadable(fileId, actorId);
 		var signed = storage.presignDownload(file.objectKey());
 		return new DownloadResult(signed.url().toString(), signed.expiresAt());
+	}
+
+	public FileStatusResult get(UUID actorId, UUID fileId) {
+		var file = records.requireOwned(fileId, actorId);
+		return new FileStatusResult(file.fileId(), file.state(), file.detectedMime());
 	}
 
 	private static boolean matchesHash(String expectedHex, String observed) {
@@ -84,6 +95,8 @@ public class FileApplicationService {
 			Map<String, String> requiredHeaders, Instant expiresAt) {
 	}
 	public record FileResult(UUID id, String state) {
+	}
+	public record FileStatusResult(UUID id, String state, String detectedMime) {
 	}
 	public record DownloadResult(String url, Instant expiresAt) {
 	}
