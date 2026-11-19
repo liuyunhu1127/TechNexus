@@ -51,7 +51,25 @@ async function mockApi(request, response) {
   const url = new URL(request.url ?? '/', `http://${request.headers.host}`)
   state.requests.push({ method: request.method, path: url.pathname, auth: request.headers.authorization, idempotency: request.headers['idempotency-key'] })
   if (request.method === 'OPTIONS') return json(response, 204, null)
+  if (request.method === 'POST' && url.pathname === '/api/v1/auth/login') {
+    const input = await body(request)
+    const accessToken = input.account === 'reviewer@example.com' ? 'reviewer-token' : 'admin-token'
+    return json(response, 200, { accessToken, csrfToken: 'test-csrf-token', expiresIn: 900, tokenType: 'Bearer' })
+  }
+  if (request.method === 'POST' && url.pathname === '/api/v1/auth/logout') {
+    response.writeHead(204, { 'Access-Control-Allow-Origin': request.headers.origin ?? '*', 'Access-Control-Allow-Credentials': 'true' })
+    return response.end()
+  }
   if (request.headers.authorization === 'Bearer reviewer-token') return json(response, 403, { code: 'ACCESS_DENIED' })
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/dashboard') {
+    return json(response, 200, { data: { pendingAudit: 2, pendingPricing: 1, failedJobs: 0, storageAlert: false, backupAlert: false } })
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/audit-tasks') {
+    return json(response, 200, { items: [{ id: tagOne, targetType: 'CONTENT', targetId: tagTwo, targetVersionId: batchId, state: 'PENDING', version: 0 }] })
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/ai-suggestions') {
+    return json(response, 200, { items: [{ id: batchId, kind: 'SUMMARY', targetType: 'CONTENT', targetId: tagOne, targetVersionId: tagTwo, state: 'SUCCEEDED', isSuggestion: true, output: { summary: 'test' }, version: 1 }] })
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/config/feature.content.ai') {
     return json(response, 200, { data: { key: 'feature.content.ai', value: { enabled: false }, version: 3 } })
   }
@@ -198,17 +216,62 @@ async function main() {
     const page = await fetch(`http://127.0.0.1:${chromePort}/json/new?http://127.0.0.1:${webPort}`, { method: 'PUT' }).then(response => response.json())
     browser = new CdpClient(page.webSocketDebuggerUrl)
     await browser.connect()
-    await browser.waitFor(() => browser.evaluate('document.body?.innerText.includes("运营总览")'), 'admin shell')
+    await browser.waitFor(() => browser.evaluate('document.body?.innerText.includes("管理员登录")'), 'admin login')
 		await browser.waitFor(() => browser.evaluate('Boolean(document.querySelector("main")?.__vueParentComponent)'), 'Vue hydration')
 
-    await setValue(browser, 'label.token input', 'reviewer-token')
-		await browser.waitFor(() => browser.evaluate('!document.querySelector("main .actions button")?.disabled'), 'dashboard button enabled')
-    await clickText(browser, 'main', '刷新数据')
-    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("HTTP 403")'), 'reviewer isolation')
+    await setValue(browser, '#admin-account', 'reviewer@example.com')
+    await setValue(browser, '#admin-password', 'ReviewerPassword!1')
+    await clickText(browser, '.login-form', '登录')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("没有管理端权限")'), 'reviewer isolation')
+    const loginRequest = state.requests.find(value => value.method === 'POST' && value.path.endsWith('/auth/login'))
+    assert(!loginRequest?.auth, 'Login request unexpectedly sent an Authorization header')
     process.stdout.write('admin_ui_step=role-isolation-pass\n')
 
-    await setValue(browser, 'label.token input', 'admin-token')
+    await setValue(browser, '#admin-account', 'admin@example.com')
+    await setValue(browser, '#admin-password', 'AdminPassword!1')
+    await clickText(browser, '.login-form', '登录')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("运营总览")'), 'admin shell')
+    process.stdout.write('admin_ui_step=login-pass\n')
+
+    await clickText(browser, 'nav', '审核任务')
+    const auditOptions = await browser.evaluate(`[...document.querySelectorAll('.toolbar select option')].map(option => [option.value, option.textContent.trim()])`)
+    assert(JSON.stringify(auditOptions) === JSON.stringify([
+      ['', '全部'], ['CREATED', '已创建'], ['PENDING', '待审核'], ['PROCESSING', '处理中'], ['APPROVED', '已通过'], ['REJECTED', '已拒绝'],
+    ]), 'Audit state values and Chinese labels do not match')
+    await clickText(browser, '.toolbar', '查询')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("待审核")'), 'localized audit task state')
+    assert(await browser.evaluate('document.querySelector("tbody")?.innerText.includes("内容")'), 'Audit target type was not localized')
+    assert(!await browser.evaluate('/PENDING|CONTENT/.test(document.querySelector("tbody")?.innerText ?? "")'), 'Raw audit enum leaked into the table')
+    await clickText(browser, 'tbody', '处理')
+    const auditDecisionOptions = await browser.evaluate(`[...document.querySelectorAll('.panel form select')].map(select => [...select.options].map(option => [option.value, option.textContent.trim()]))`)
+    assert(JSON.stringify(auditDecisionOptions[0]) === JSON.stringify([['APPROVED', '通过'], ['REJECTED', '拒绝']]), 'Audit decision labels do not match')
+    assert(auditDecisionOptions[1].some(option => option[0] === 'INVALID_PRICE' && option[1] === '定价无效'), 'Audit reason labels are incomplete')
+
+    await clickText(browser, 'nav', '定价确认')
+    const pricingOptions = await browser.evaluate(`[...document.querySelectorAll('main form select option')].map(option => [option.value, option.textContent.trim()])`)
+    assert(JSON.stringify(pricingOptions) === JSON.stringify([
+      ['DEMAND', '需求'], ['DOCUMENT', '文档'], ['ATTACHMENT', '附件'], ['SERVICE', '服务'],
+    ]), 'Pricing target values and Chinese labels do not match')
+    process.stdout.write('admin_ui_step=enum-localization-pass\n')
+
+    await clickText(browser, 'nav', 'AI 建议')
+    const aiStateOptions = await browser.evaluate(`[...document.querySelectorAll('.toolbar select option')].map(option => [option.value, option.textContent.trim()])`)
+    assert(aiStateOptions.some(option => option[0] === 'SUCCEEDED' && option[1] === '已生成'), 'AI state labels do not match')
+    const aiFormOptions = await browser.evaluate(`(() => {
+      const forms = [...document.querySelectorAll('main form')]
+      return forms.map(form => [...form.querySelectorAll('select')].map(select => [...select.options].map(option => [option.value, option.textContent.trim()])))
+    })()`)
+    assert(aiFormOptions[0][0].some(option => option[0] === 'DEMAND_STRUCTURE' && option[1] === '需求结构化'), 'AI kind labels do not match')
+    assert(aiFormOptions[0][1].some(option => option[0] === 'AUDIT_TASK' && option[1] === '审核任务'), 'AI target labels do not match')
+    assert(aiFormOptions[1][0].some(option => option[0] === 'EDIT' && option[1] === '编辑后采纳'), 'AI decision labels do not match')
+    await clickText(browser, '.toolbar', '查询')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("已生成")'), 'localized AI suggestion')
+    assert(await browser.evaluate('document.querySelector("tbody")?.innerText.includes("摘要建议") && document.querySelector("tbody")?.innerText.includes("内容")'), 'AI suggestion table was not fully localized')
+    assert(!await browser.evaluate('/SUCCEEDED|SUMMARY|CONTENT/.test(document.querySelector("tbody")?.innerText ?? "")'), 'Raw AI enum leaked into the table')
+    process.stdout.write('admin_ui_step=ai-localization-pass\n')
+
     await clickText(browser, 'nav', '配置中心')
+    assert(await browser.evaluate('document.body.innerText.includes("功能开关") && !document.body.innerText.includes("Feature Flag")'), 'Feature Flag wording was not localized')
     const systemPanel = '.panel:has(h2:first-child)'
     await clickText(browser, systemPanel, '读取')
     await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("配置已加载")'), 'config load')
@@ -236,7 +299,8 @@ async function main() {
       })
       panel.querySelector('form button').click()
     })()`)
-    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("PARTIAL_FAILED") && document.body.innerText.includes("VERSION_CONFLICT")'), 'partial batch')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("部分失败") && document.body.innerText.includes("版本冲突")'), 'localized partial batch')
+    assert(!await browser.evaluate('/PARTIAL_FAILED|VERSION_CONFLICT/.test(document.body.innerText)'), 'Raw batch enum leaked into the page')
     const batchRequest = state.requests.find(value => value.method === 'POST' && value.path.endsWith('/tag-batches'))
     assert(batchRequest?.idempotency, 'Batch mutation did not send Idempotency-Key')
     process.stdout.write('admin_ui_step=partial-batch-pass\n')
@@ -245,9 +309,14 @@ async function main() {
       const panel = [...document.querySelectorAll('.panel')].find(value => value.querySelector('h2')?.textContent === '特权操作审计')
       panel.querySelector('button').click()
     })()`)
-    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("TAG_UPDATE")'), 'operation audit')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("更新标签")'), 'localized operation audit')
+    assert(!await browser.evaluate('document.body.innerText.includes("TAG_UPDATE")'), 'Raw audit action leaked into the page')
     process.stdout.write('admin_ui_step=audit-pass\n')
-    process.stdout.write('admin_ui_smoke_tests=4\nadmin_ui_smoke_browser=Chromium-CDP\nadmin_ui_smoke_gate=PASS\n')
+
+    await clickText(browser, 'header', '退出登录')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("管理员登录")'), 'logout return to login')
+    process.stdout.write('admin_ui_step=logout-pass\n')
+    process.stdout.write('admin_ui_smoke_tests=8\nadmin_ui_smoke_browser=Chromium-CDP\nadmin_ui_smoke_gate=PASS\n')
   } finally {
     browser?.close()
     await stopChild(chrome)

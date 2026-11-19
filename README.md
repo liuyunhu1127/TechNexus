@@ -244,8 +244,8 @@ npm --prefix technexus-web run test:quality-smoke
 
 1. 启动后端前设置 `TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL`；
 2. 使用同一邮箱调用注册接口；
-3. 登录获取 Access Token；
-4. 将 Token 粘贴到管理端“管理员 Access Token”输入框并刷新数据。
+3. 打开管理端并使用该邮箱、注册密码登录；
+4. 管理端会调用后端验证管理员权限，验证通过后进入运营总览。普通账号不能进入管理台。
 
 PowerShell 示例：
 
@@ -266,17 +266,9 @@ Invoke-RestMethod `
   -ContentType 'application/json' `
   -Body $registerBody
 
-$loginBody = @{ account = $adminEmail; password = $adminPassword } | ConvertTo-Json
-$login = Invoke-RestMethod `
-  -Method Post `
-  -Uri 'http://localhost:8080/api/v1/auth/login' `
-  -ContentType 'application/json' `
-  -Body $loginBody
-
-$login.accessToken
 ```
 
-如果该邮箱已经注册，不要重复注册，直接登录即可。修改 bootstrap 邮箱会改变后续 Token 的管理员权限判定，因此生产环境必须受控变更。
+如果该邮箱已经注册，不要重复注册，直接在管理端登录即可。修改 bootstrap 邮箱会改变后续 Token 的管理员权限判定，因此生产环境必须受控变更。
 
 ## 7. 用户操作手册
 
@@ -318,13 +310,13 @@ Access Token 仅保存在 Nuxt 内存状态中；页面刷新时使用 `HttpOnly
 
 ### 8.1 运营总览
 
-1. 按“首个管理员账号”步骤取得管理员 Access Token；
+1. 按“首个管理员账号”步骤完成管理员注册；
 2. 打开 `http://localhost:5173`；
-3. 把 Token 粘贴到“管理员 Access Token”；
-4. 点击“刷新数据”；
-5. 页面显示当前业务对象计数和生成时间。
+3. 输入管理员邮箱和密码并登录；
+4. 登录后自动验证管理员权限并显示运营总览；
+5. 使用右上角“退出登录”安全结束会话。
 
-Token 只保存在当前浏览器的 `sessionStorage`；关闭标签页后应重新输入。不要在截图、工单或聊天中发送 Token。
+管理端不再要求人工复制 Token。Access Token 与 CSRF Token 仅保存在当前浏览器的 `sessionStorage`，Refresh Token 使用 `HttpOnly`、`Secure` Cookie；会话过期或服务端返回 401 时页面自动回到登录界面。不要在截图、工单或聊天中发送 Token。
 
 ### 8.2 审核、定价、配置与运营
 
@@ -372,9 +364,9 @@ AI 输出只能作为建议，不得直接覆盖审核、最终价格、权限�
 ### 管理端无法读取运营看板
 
 - 确认 Vite 与后端都已启动；
-- Token 必须由 `TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL` 对应账号登录产生；
-- 普通用户 Token 会稳定返回 403；过期或无效 Token 返回 401；
-- 重新登录获取 Token，不要手工拼接 JWT。
+- 登录邮箱必须与 `TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL` 对应；
+- 普通用户登录后会显示“没有管理端权限”；过期或无效会话会自动返回登录页；
+- 清除该站点的 Cookie 与 `sessionStorage` 后重新登录，不要手工拼接或粘贴 JWT。
 
 ### Refresh 或 Logout 返回 403
 
