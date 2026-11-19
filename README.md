@@ -103,6 +103,7 @@ $env:TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL='admin@example.com'
 $env:TECHNEXUS_ALLOWED_ORIGINS='http://localhost:3000'
 
 $env:TECHNEXUS_STORAGE_ENDPOINT='http://localhost:9000'
+$env:TECHNEXUS_STORAGE_INTERNAL_ENDPOINT='http://localhost:9000'
 $env:TECHNEXUS_STORAGE_BUCKET='technexus-files'
 $env:TECHNEXUS_STORAGE_REGION='us-east-1'
 $env:TECHNEXUS_STORAGE_ACCESS_KEY='replace-with-access-key'
@@ -122,7 +123,7 @@ $env:TECHNEXUS_AI_ENABLED='false'
 | `TECHNEXUS_JWT_SECRET` | 是 | 至少 32 个 UTF-8 字节；更换后已有 Token 全部失效 |
 | `TECHNEXUS_BOOTSTRAP_ADMIN_EMAIL` | 建议 | 与管理员注册邮箱完全一致，不区分大小写 |
 | `TECHNEXUS_ALLOWED_ORIGINS` | 是 | Refresh/Logout 允许的 Origin；多个值用逗号分隔 |
-| `TECHNEXUS_STORAGE_*` | 是 | 即使暂不使用文件，启动时也必须提供格式合法的配置 |
+| `TECHNEXUS_STORAGE_*` | 是 | `ENDPOINT` 是返回浏览器的 HTTPS 地址；`INTERNAL_ENDPOINT` 可覆盖为后端可信内网地址；其余存储配置即使暂不使用文件也必须合法 |
 | `TECHNEXUS_CLAMAV_*` | 文件功能必填 | daemon 地址、端口、超时和轮询周期 |
 | `TECHNEXUS_AI_*` | AI 开启时必填 | 默认关闭；开启时必须配置兼容 API 和 Key |
 
