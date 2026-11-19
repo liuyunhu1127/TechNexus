@@ -30,7 +30,8 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	private static final DateTimeFormatter AMZ_TIME = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
 			.withZone(ZoneOffset.UTC);
 	private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneOffset.UTC);
-	private final URI endpoint;
+	private final URI publicEndpoint;
+	private final URI internalEndpoint;
 	private final String bucket;
 	private final String region;
 	private final String accessKey;
@@ -39,25 +40,38 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	private final HttpClient http;
 
 	@Autowired
-	public S3ObjectStorageAdapter(@Value("${technexus.storage.endpoint}") URI endpoint,
+	public S3ObjectStorageAdapter(@Value("${technexus.storage.endpoint}") URI publicEndpoint,
+			@Value("${technexus.storage.internal-endpoint:${technexus.storage.endpoint}}") URI internalEndpoint,
 			@Value("${technexus.storage.bucket}") String bucket,
 			@Value("${technexus.storage.region:us-east-1}") String region,
 			@Value("${technexus.storage.access-key}") String accessKey,
 			@Value("${technexus.storage.secret-key}") String secretKey) {
-		this(endpoint, bucket, region, accessKey, secretKey, Clock.systemUTC(),
+		this(publicEndpoint, internalEndpoint, bucket, region, accessKey, secretKey, Clock.systemUTC(),
 				HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
 	}
 
 	S3ObjectStorageAdapter(URI endpoint, String bucket, String region, String accessKey, String secretKey, Clock clock,
 			HttpClient http) {
-		if (!"https".equalsIgnoreCase(endpoint.getScheme()) && !isLocal(endpoint.getHost())) {
+		this(endpoint, endpoint, bucket, region, accessKey, secretKey, clock, http);
+	}
+
+	S3ObjectStorageAdapter(URI publicEndpoint, URI internalEndpoint, String bucket, String region, String accessKey,
+			String secretKey, Clock clock, HttpClient http) {
+		validateEndpoint(publicEndpoint, false);
+		validateEndpoint(internalEndpoint, true);
+		if (!"https".equalsIgnoreCase(publicEndpoint.getScheme()) && !isLocal(publicEndpoint.getHost())) {
 			throw new IllegalStateException("Object storage endpoint must use HTTPS outside localhost");
 		}
+		if (!"https".equalsIgnoreCase(internalEndpoint.getScheme())
+				&& !isTrustedInsecureInternalHost(internalEndpoint.getHost()))
+			throw new IllegalStateException(
+					"Object storage internal endpoint must use HTTPS outside a trusted local network");
 		if (!bucket.matches("[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"))
 			throw new IllegalStateException("Invalid object storage bucket");
 		if (accessKey.isBlank() || secretKey.length() < 16)
 			throw new IllegalStateException("Object storage credentials are missing");
-		this.endpoint = endpoint;
+		this.publicEndpoint = publicEndpoint;
+		this.internalEndpoint = internalEndpoint;
 		this.bucket = bucket;
 		this.region = region;
 		this.accessKey = accessKey;
@@ -70,14 +84,14 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	public PresignedUpload presignUpload(String key, String mime, String sha256Hex) {
 		var checksum = Base64.getEncoder().encodeToString(java.util.HexFormat.of().parseHex(sha256Hex));
 		var headers = Map.of("content-type", mime, "x-amz-checksum-sha256", checksum);
-		return new PresignedUpload(presign("PUT", key, 900, headers),
+		return new PresignedUpload(presign(publicEndpoint, "PUT", key, 900, headers),
 				Map.of("Content-Type", mime, "x-amz-checksum-sha256", checksum), clock.instant().plusSeconds(900));
 	}
 
 	@Override
 	public ObjectMetadata inspect(String key) {
 		try {
-			var uri = presign("HEAD", key, 60, Map.of("x-amz-checksum-mode", "ENABLED"));
+			var uri = presign(internalEndpoint, "HEAD", key, 60, Map.of("x-amz-checksum-mode", "ENABLED"));
 			var request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10))
 					.header("x-amz-checksum-mode", "ENABLED").method("HEAD", HttpRequest.BodyPublishers.noBody())
 					.build();
@@ -103,8 +117,8 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	@Override
 	public InputStream openContent(String key) {
 		try {
-			var request = HttpRequest.newBuilder(presign("GET", key, 60, Map.of())).timeout(Duration.ofSeconds(30))
-					.GET().build();
+			var request = HttpRequest.newBuilder(presign(internalEndpoint, "GET", key, 60, Map.of()))
+					.timeout(Duration.ofSeconds(30)).GET().build();
 			var response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
 			if (response.statusCode() / 100 != 2) {
 				response.body().close();
@@ -123,7 +137,8 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 
 	@Override
 	public PresignedDownload presignDownload(String key) {
-		return new PresignedDownload(presign("GET", key, 300, Map.of()), clock.instant().plusSeconds(300));
+		return new PresignedDownload(presign(publicEndpoint, "GET", key, 300, Map.of()),
+				clock.instant().plusSeconds(300));
 	}
 
 	@Override
@@ -131,7 +146,8 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 		var copySource = "/" + encode(bucket) + "/" + encodeKey(sourceKey);
 		try {
 			var request = HttpRequest
-					.newBuilder(presign("PUT", quarantineKey, 60, Map.of("x-amz-copy-source", copySource)))
+					.newBuilder(presign(internalEndpoint, "PUT", quarantineKey, 60,
+							Map.of("x-amz-copy-source", copySource)))
 					.timeout(Duration.ofSeconds(30)).header("x-amz-copy-source", copySource)
 					.PUT(HttpRequest.BodyPublishers.noBody()).build();
 			var response = http.send(request, HttpResponse.BodyHandlers.discarding());
@@ -151,8 +167,8 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	@Override
 	public void delete(String key) {
 		try {
-			var request = HttpRequest.newBuilder(presign("DELETE", key, 60, Map.of())).timeout(Duration.ofSeconds(10))
-					.DELETE().build();
+			var request = HttpRequest.newBuilder(presign(internalEndpoint, "DELETE", key, 60, Map.of()))
+					.timeout(Duration.ofSeconds(10)).DELETE().build();
 			var response = http.send(request, HttpResponse.BodyHandlers.discarding());
 			if (response.statusCode() / 100 != 2 && response.statusCode() != 404)
 				throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "对象存储暂不可用");
@@ -166,12 +182,12 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 		}
 	}
 
-	private URI presign(String method, String key, int expires, Map<String, String> requiredHeaders) {
+	private URI presign(URI endpoint, String method, String key, int expires, Map<String, String> requiredHeaders) {
 		try {
 			var now = clock.instant();
 			var day = DAY.format(now);
 			var scope = day + "/" + region + "/s3/aws4_request";
-			var canonicalUri = normalizedEndpointPath() + "/" + encode(bucket) + "/" + encodeKey(key);
+			var canonicalUri = normalizedEndpointPath(endpoint) + "/" + encode(bucket) + "/" + encodeKey(key);
 			var headers = new TreeMap<String, String>();
 			headers.put("host",
 					endpoint.getPort() < 0 ? endpoint.getHost() : endpoint.getHost() + ":" + endpoint.getPort());
@@ -205,14 +221,24 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 		}
 	}
 
-	private String normalizedEndpointPath() {
+	private static String normalizedEndpointPath(URI endpoint) {
 		var path = endpoint.getRawPath();
 		if (path == null || path.isBlank() || "/".equals(path))
 			return "";
 		return path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
 	}
+	private static void validateEndpoint(URI endpoint, boolean internal) {
+		if (endpoint == null || endpoint.getScheme() == null || endpoint.getHost() == null
+				|| endpoint.getRawUserInfo() != null || endpoint.getRawQuery() != null
+				|| endpoint.getRawFragment() != null
+				|| !("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme())))
+			throw new IllegalStateException("Invalid object storage " + (internal ? "internal " : "") + "endpoint");
+	}
 	private static boolean isLocal(String host) {
 		return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host);
+	}
+	private static boolean isTrustedInsecureInternalHost(String host) {
+		return isLocal(host) || (host != null && host.matches("[a-zA-Z0-9-]+"));
 	}
 	private static String encodeKey(String key) {
 		return java.util.Arrays.stream(key.split("/", -1)).map(S3ObjectStorageAdapter::encode)

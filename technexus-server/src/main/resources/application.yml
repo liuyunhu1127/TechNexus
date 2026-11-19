@@ -52,6 +52,7 @@ technexus:
     allowed-origins: ${TECHNEXUS_ALLOWED_ORIGINS:http://localhost:3000}
   storage:
     endpoint: ${TECHNEXUS_STORAGE_ENDPOINT:http://localhost:9000}
+    internal-endpoint: ${TECHNEXUS_STORAGE_INTERNAL_ENDPOINT:${TECHNEXUS_STORAGE_ENDPOINT:http://localhost:9000}}
     bucket: ${TECHNEXUS_STORAGE_BUCKET:technexus-files}
     region: ${TECHNEXUS_STORAGE_REGION:us-east-1}
     access-key: ${TECHNEXUS_STORAGE_ACCESS_KEY}
