@@ -24,9 +24,11 @@ import com.technexus.server.community.application.DiscoveryApplicationService;
 import com.technexus.server.community.application.SearchApplicationService;
 import com.technexus.server.demand.application.DemandApplicationService;
 import com.technexus.server.file.application.port.FileRecordPort;
+import com.technexus.server.user.application.EmailActionStore;
 import com.technexus.server.web.idempotency.IdempotencyStore.State;
 import com.technexus.server.web.idempotency.JdbcIdempotencyStore;
 import com.technexus.user.domain.UserStatus;
+import com.technexus.user.api.UserRepository;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -45,6 +47,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(properties = {"technexus.security.jwt-secret=integration-secret-that-is-at-least-thirty-two-bytes-long",
 		"technexus.storage.access-key=integration-access", "technexus.storage.secret-key=integration-secret",
@@ -85,17 +88,60 @@ class MySqlPersistenceIntegrationTest {
 	private JdbcIdempotencyStore idempotency;
 	@Autowired
 	private JdbcLoginRateLimiter rateLimiter;
+	@Autowired
+	private EmailActionStore emailActions;
+	@Autowired
+	private UserRepository users;
+	@Autowired
+	private TransactionTemplate transactions;
 
 	@Test
 	void appliesAllMigrationsOnMySql84() {
 		var current = flyway.info().current();
-		assertEquals("14", current.getVersion().getVersion());
+		assertEquals("15", current.getVersion().getVersion());
 		var count = jdbc.queryForObject("""
 				SELECT COUNT(*) FROM information_schema.tables
 				WHERE table_schema=DATABASE() AND table_name IN
-				('tn_user','tn_auth_session','tn_article','tn_demand','tn_audit_task','tn_ai_suggestion','tn_tag_alias')
+				('tn_user','tn_auth_session','tn_article','tn_demand','tn_audit_task','tn_ai_suggestion',
+				 'tn_tag_alias','tn_account_email_action')
 				""", Integer.class);
-		assertEquals(7, count);
+		assertEquals(8, count);
+	}
+
+	@Test
+	void persistsVerifiedEmailAndReplacesAndConsumesOneTimeActions() throws Exception {
+		var account = account("account-center");
+		var expires = Instant.now().plusSeconds(300);
+		var current = users.findById(account).orElseThrow();
+		assertFalse(current.emailVerified());
+		var replacementId = UUID.randomUUID();
+		var originalId = UUID.randomUUID();
+		var kind = EmailActionStore.Kind.VERIFY_EMAIL;
+		transactions.executeWithoutResult(status -> {
+			emailActions.replace(new EmailActionStore.Action(originalId, account, kind, current.normalizedEmail(),
+					current.normalizedEmail(), 0, new byte[32], null, expires));
+			emailActions.replace(new EmailActionStore.Action(replacementId, account, kind, current.normalizedEmail(),
+					current.normalizedEmail(), 0, new byte[32], null, expires));
+			assertTrue(emailActions.lock(originalId, kind).isEmpty());
+			assertEquals(account, emailActions.lock(replacementId, kind).orElseThrow().userId());
+			assertTrue(emailActions.consume(replacementId));
+			assertFalse(emailActions.consume(replacementId));
+			current.verifyEmail();
+			users.save(current);
+		});
+		var verified = users.findById(account).orElseThrow();
+		assertTrue(verified.emailVerified());
+		var changedEmail = "changed-" + UUID.randomUUID() + "@example.com";
+		var passwordHash = "$argon2id$" + "b".repeat(32);
+		transactions.executeWithoutResult(status -> {
+			verified.changeVerifiedEmail(changedEmail);
+			users.save(verified);
+			accounts.updatePassword(account, passwordHash);
+			accounts.revokeAllSessions(account);
+		});
+		assertTrue(accounts.findByEmail(current.normalizedEmail()).isEmpty());
+		assertEquals(passwordHash, accounts.findByEmail(changedEmail).orElseThrow().passwordHash());
+		assertEquals(1, users.findByEmail(changedEmail).orElseThrow().sessionVersion());
 	}
 
 	@Test

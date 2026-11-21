@@ -79,6 +79,10 @@ async function mockApi(request, response) {
     }
     return json(response, 200, { data: profile })
   }
+  if (url.pathname === '/api/v1/me/avatar') {
+    assert(request.headers.authorization === 'Bearer admin-token', 'Avatar request missing admin session')
+    return json(response, 200, { data: { version: profile.version } })
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/users') {
     return json(response, 200, { items: [managedUser], page: 1, hasNext: false })
   }
@@ -351,6 +355,8 @@ async function main() {
 
     await clickText(browser, 'nav', '个人中心')
     await browser.waitFor(() => browser.evaluate('document.querySelector("input[autocomplete=nickname]")?.value === "维护者"'), 'admin profile')
+    await browser.waitFor(() => browser.evaluate('!!document.querySelector(".avatar-editor input[type=file]:enabled")'), 'admin avatar editor')
+    assert(!await browser.evaluate(`Boolean(document.querySelector('.email-settings, a[href="/forgot-password"]'))`), 'Bootstrap admin must not get self-service email or password recovery controls')
     await setValue(browser, 'input[autocomplete="nickname"]', '管理端测试昵称')
     await clickText(browser, 'main form', '保存资料')
     await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("个人资料已保存")'), 'admin profile save')

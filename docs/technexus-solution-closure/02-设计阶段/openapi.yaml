@@ -115,6 +115,159 @@ paths:
               schema: {$ref: '#/components/schemas/ProfileResponse'}
         '400': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /me/security:
+    get:
+      tags: [Profile]
+      operationId: getMyAccountSecurity
+      responses:
+        '200':
+          description: Current account security settings
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSecurityResponse'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /me/avatar:
+    get:
+      tags: [Profile]
+      operationId: getMyAvatar
+      responses:
+        '200':
+          description: Private avatar link and profile version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AvatarResponse'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Profile]
+      operationId: changeMyAvatar
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AvatarChangeRequest'}
+      responses:
+        '200':
+          description: Updated profile version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AvatarChangeResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      operationId: requestPasswordReset
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForgotPasswordRequest'}
+      responses:
+        '202':
+          description: Generic acknowledgment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountMailAcknowledgment'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResetPasswordRequest'}
+      responses:
+        '204': {description: Password replaced and all sessions revoked}
+        '400': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /me/email-verification:
+    post:
+      tags: [Profile]
+      operationId: requestEmailVerification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmailVerificationRequest'}
+      responses:
+        '202':
+          description: Verification request created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EmailActionResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /me/email-verification/confirm:
+    post:
+      tags: [Profile]
+      operationId: confirmEmailVerification
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmailVerificationConfirmation'}
+      responses:
+        '204': {description: Current email verified}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /me/email-change:
+    post:
+      tags: [Profile]
+      operationId: requestEmailChange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmailChangeRequest'}
+      responses:
+        '202':
+          description: Confirmation sent to both addresses
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EmailActionResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Problem'}
+  /me/email-change/confirm:
+    post:
+      tags: [Profile]
+      operationId: confirmEmailChange
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmailChangeConfirmation'}
+      responses:
+        '204': {description: Email replaced and all sessions revoked}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '429': {$ref: '#/components/responses/RateLimited'}
   /contents:
     get:
       tags: [Content]
@@ -1303,6 +1456,104 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/TokenResponse'}
   schemas:
+    AccountEmail:
+      type: string
+      format: email
+      maxLength: 254
+    AccountEmailCode:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{24}$'
+      writeOnly: true
+    EmailVerificationRequest:
+      type: object
+      required: [password]
+      properties:
+        password: {type: string, format: password, minLength: 1, maxLength: 128}
+    EmailVerificationConfirmation:
+      type: object
+      required: [requestId, code]
+      properties:
+        requestId: {type: string, format: uuid}
+        code: {$ref: '#/components/schemas/AccountEmailCode'}
+    EmailChangeRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {$ref: '#/components/schemas/AccountEmail'}
+        password: {type: string, format: password, minLength: 1, maxLength: 128}
+    EmailChangeConfirmation:
+      type: object
+      required: [requestId, oldCode, newCode]
+      properties:
+        requestId: {type: string, format: uuid}
+        oldCode: {$ref: '#/components/schemas/AccountEmailCode'}
+        newCode: {$ref: '#/components/schemas/AccountEmailCode'}
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {$ref: '#/components/schemas/AccountEmail'}
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: {type: string, pattern: '^[0-9a-fA-F-]{36}\.[A-Za-z0-9_-]{24}$', writeOnly: true}
+        password: {type: string, format: password, minLength: 12, maxLength: 128}
+    EmailActionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [requestId]
+          properties:
+            requestId: {type: string, format: uuid}
+    AccountMailAcknowledgment:
+      type: object
+      required: [message]
+      properties:
+        message: {type: string}
+    AccountSecurityResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [email, verified, bootstrapAdmin, mailEnabled]
+          properties:
+            email: {$ref: '#/components/schemas/AccountEmail'}
+            verified: {type: boolean}
+            bootstrapAdmin: {type: boolean}
+            mailEnabled: {type: boolean}
+    AvatarResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [version]
+          properties:
+            url: {type: [string, 'null'], format: uri}
+            expiresAt: {type: [string, 'null'], format: date-time}
+            version: {type: integer, minimum: 0}
+    AvatarChangeRequest:
+      type: object
+      required: [expectedVersion]
+      properties:
+        fileId:
+          type: [string, 'null']
+          format: uuid
+          description: Owned scanned image ID. Null clears the avatar.
+        expectedVersion: {type: integer, minimum: 0}
+    AvatarChangeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [version]
+          properties:
+            version: {type: integer, minimum: 0}
     ManagedUserStatus:
       type: string
       enum: [REGISTERED, ACTIVE, LOCKED, DISABLED, CANCELLED]

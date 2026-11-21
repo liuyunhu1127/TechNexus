@@ -137,6 +137,17 @@ public class JdbcAuthAccountStore implements AuthAccountStore {
 	}
 
 	@Override
+	public void updatePassword(UUID userId, String passwordHash) {
+		var updated = jdbc.update("""
+				UPDATE tn_auth_credential SET password_hash=?,failed_attempt=0,locked_until=NULL,
+				  version=version+1,updated_at=CURRENT_TIMESTAMP(6)
+				WHERE user_id=(SELECT id FROM tn_user WHERE public_id=?) AND status='ACTIVE'
+				""", passwordHash, UuidBinary.toBytes(userId));
+		if (updated != 1)
+			throw new DomainException("ACCOUNT_ACTION_INVALID", "验证已失效，请重新申请");
+	}
+
+	@Override
 	public boolean isAccessSessionActive(UUID userId, UUID sid, long sessionVersion) {
 		var count = jdbc.queryForObject("""
 				SELECT COUNT(*) FROM tn_auth_session s JOIN tn_user u ON u.id=s.user_id

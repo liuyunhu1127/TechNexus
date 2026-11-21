@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { useState } from '#imports'
 import { onMounted } from 'vue'
+import AccountAvatarEditor from '../../frontend-shared/AccountAvatarEditor.vue'
 
 type Profile = { id: string, displayName: string, bio: string, status: string, version: number }
 type ProfileFailure = { statusCode?: number, status?: number }
@@ -10,6 +12,7 @@ const expired = ref(false)
 const error = ref('')
 const message = ref('')
 const profile = ref<Profile | null>(null)
+const avatarUrl = useState<string | null>('account-avatar-url', () => null)
 const form = reactive({ displayName: '', bio: '' })
 const statuses: Record<string, string> = {
   ACTIVE: '正常', REGISTERED: '待激活', LOCKED: '锁定', DISABLED: '已停用', CANCELLED: '已注销',
@@ -47,6 +50,24 @@ function loadProfile() {
   }, '暂时无法加载个人资料，请重试。')
 }
 
+async function refreshProfileVersion() {
+  const current = profile.value
+  if (!current) return
+  try {
+    const { data } = await request<{ data: Profile }>('/me')
+    // Keep unsaved text and preserve conflict detection for edits from another tab.
+    if (profile.value === current && data.displayName === current.displayName && data.bio === current.bio)
+      profile.value = data
+  } catch {
+    // The profile reload button remains available.
+  }
+}
+
+function avatarChanged(url: string | null) {
+  avatarUrl.value = url
+  void refreshProfileVersion()
+}
+
 function saveProfile() {
   const current = profile.value
   if (!current || !form.displayName.trim()) return
@@ -75,6 +96,7 @@ useSeoMeta({ title: '个人中心' })
     <NuxtLink class="button primary" :to="{ path: '/login', query: { redirect: '/me' } }">前往登录</NuxtLink>
   </section>
   <section v-else class="editor-card">
+    <AccountAvatarEditor v-if="profile" :request="request" :name="profile.displayName" @changed="avatarChanged" />
     <p v-if="error" class="notice error" role="alert">{{ error }}</p>
     <p v-if="message" class="notice success" role="status">{{ message }}</p>
     <form v-if="profile" class="form-grid" @submit.prevent="saveProfile">
@@ -88,4 +110,5 @@ useSeoMeta({ title: '个人中心' })
     </form>
     <button v-else type="button" class="button" :disabled="busy" @click="loadProfile">重新加载</button>
   </section>
+  <AccountEmailSettings v-if="ready && isAuthenticated && !expired && profile" @verified="refreshProfileVersion" />
 </template>

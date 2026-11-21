@@ -29,7 +29,9 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
 @Profile("!test")
 public class IdempotencyFilter extends OncePerRequestFilter {
 	private static final Set<String> METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
-	private static final Set<String> EXCLUDED_PATHS = Set.of("/api/v1/auth/login", "/api/v1/auth/refresh");
+	// Keep direct hashes of password submissions out of the idempotency store.
+	private static final Set<String> EXCLUDED_PATHS = Set.of("/api/v1/auth/login", "/api/v1/auth/refresh",
+			"/api/v1/auth/reset-password", "/api/v1/me/email-verification", "/api/v1/me/email-change");
 	private final IdempotencyStore store;
 	private final ObjectMapper json;
 

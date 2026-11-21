@@ -11,6 +11,9 @@ public interface ObjectStoragePort {
 	InputStream openContent(String objectKey);
 	PresignedDownload presignDownload(String objectKey);
 	void quarantine(String sourceKey, String quarantineKey);
+	default void storeAvatar(String objectKey, byte[] png) {
+		throw new UnsupportedOperationException("Avatar storage unavailable");
+	}
 	default void delete(String objectKey) {
 	}
 

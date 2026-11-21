@@ -142,6 +142,23 @@ public class S3ObjectStorageAdapter implements ObjectStoragePort {
 	}
 
 	@Override
+	public void storeAvatar(String key, byte[] png) {
+		try {
+			var request = HttpRequest
+					.newBuilder(presign(internalEndpoint, "PUT", key, 60, Map.of("content-type", "image/png")))
+					.timeout(Duration.ofSeconds(10)).header("content-type", "image/png")
+					.PUT(HttpRequest.BodyPublishers.ofByteArray(png)).build();
+			if (http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() / 100 != 2)
+				throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "头像暂时无法保存");
+		} catch (InterruptedException error) {
+			Thread.currentThread().interrupt();
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "头像暂时无法保存");
+		} catch (java.io.IOException error) {
+			throw new DomainException("OBJECT_STORAGE_UNAVAILABLE", "头像暂时无法保存");
+		}
+	}
+
+	@Override
 	public void quarantine(String sourceKey, String quarantineKey) {
 		var copySource = "/" + encode(bucket) + "/" + encodeKey(sourceKey);
 		try {

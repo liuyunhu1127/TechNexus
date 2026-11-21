@@ -29,6 +29,7 @@ type AuthResponse = { accessToken: string, csrfToken: string, expiresIn: number,
 const token = ref('')
 const csrfToken = ref(sessionStorage.getItem('tn_admin_csrf') ?? '')
 const account = ref(sessionStorage.getItem('tn_admin_account') ?? '')
+const accountAvatar = ref<string | null>(null)
 const password = ref('')
 const sessionReady = ref(false)
 const active = ref<Section>('dashboard')
@@ -163,12 +164,17 @@ function clearSession() {
   csrfToken.value = ''
   password.value = ''
   dashboard.value = null
+  accountAvatar.value = null
   active.value = 'dashboard'
   sessionStorage.removeItem('tn_admin_token')
   sessionStorage.removeItem('tn_admin_csrf')
 }
 async function verifyAdministrator() {
   dashboard.value = (await api<{ data: Dashboard }>('/admin/dashboard', token.value)).data
+  const verifiedToken = token.value
+  void api<{ data: { url?: string } }>('/me/avatar', verifiedToken).then(({ data }) => {
+    if (token.value === verifiedToken) accountAvatar.value = data.url ?? null
+  }).catch(() => undefined)
 }
 async function refreshAccessToken() {
   const response = await api<AuthResponse>('/auth/refresh', '', {
@@ -413,10 +419,10 @@ onMounted(restoreSession)
   <div v-else class="shell">
     <aside><strong>TechNexus</strong><span>管理端</span><nav aria-label="管理导航"><button v-for="item in navigation" :key="item[0]" type="button" :class="{ active: active === item[0] }" :aria-current="active === item[0] ? 'page' : undefined" :disabled="busy" @click="show(item[0])">{{ item[1] }}</button></nav></aside>
     <main>
-      <header><div><p>运营管理</p><h1>{{ sectionTitles[active] }}</h1></div><div class="session"><span>{{ account }}</span><button class="secondary" :disabled="busy" @click="logout">退出登录</button></div></header>
+      <header><div><p>运营管理</p><h1>{{ sectionTitles[active] }}</h1></div><div class="session"><img v-if="accountAvatar" class="session-avatar" :src="accountAvatar" alt="" referrerpolicy="no-referrer"><span>{{ account }}</span><button class="secondary" :disabled="busy" @click="logout">退出登录</button></div></header>
       <p v-if="error" class="error" role="alert">{{ error }}</p><p v-if="message" class="success" role="status">{{ message }}</p>
       <template v-if="active === 'dashboard'"><div class="actions"><button :disabled="busy || !token" @click="loadDashboard">刷新数据</button></div><section class="cards" aria-label="运营指标"><article v-for="card in dashboardCards" :key="String(card[0])"><span>{{ card[0] }}</span><strong>{{ card[1] }}</strong></article><article v-if="!dashboard"><span>等待连接</span><strong>—</strong></article></section></template>
-      <PersonalCenter v-else-if="active === 'profile'" :account="account" :token="token" :busy="busy" :run="run" />
+      <PersonalCenter v-else-if="active === 'profile'" :account="account" :token="token" :busy="busy" :run="run" @avatar-changed="accountAvatar = $event" />
       <UserManagement v-else-if="active === 'users'" :account="account" :token="token" :busy="busy" :run="run" />
       <PostManagement v-else-if="active === 'posts'" :token="token" :busy="busy" :run="run" />
       <section v-else-if="active === 'audit'" class="panel wide"><div class="toolbar"><label>状态<select v-model="auditState"><option value="">全部</option><option v-for="state in auditStateOptions" :key="state.value" :value="state.value">{{ state.label }}</option></select></label><button :disabled="busy || !token" @click="loadAudits">查询</button></div><p v-if="!auditTasks.length" class="muted">暂无已加载任务。</p><div class="table-wrap"><table v-if="auditTasks.length"><thead><tr><th>状态</th><th>目标</th><th>版本</th><th></th></tr></thead><tbody><tr v-for="task in auditTasks" :key="task.id"><td>{{ auditStateLabel(task.state) }}</td><td><code>{{ enumLabel(auditTargetTypeLabels, task.targetType) }} / {{ task.targetId }}</code></td><td>{{ task.version }}</td><td><button class="secondary" @click="selectedAudit = task">处理</button></td></tr></tbody></table></div><form v-if="selectedAudit" class="form-grid" @submit.prevent="decideAudit"><h2>决定任务 {{ selectedAudit.id }}</h2><label>决定<select v-model="auditDecision"><option v-for="decision in auditDecisionOptions" :key="decision.value" :value="decision.value">{{ decision.label }}</option></select></label><label>原因<select v-model="auditReason"><option v-for="reason in auditReasonOptions" :key="reason.value" :value="reason.value">{{ reason.label }}</option></select></label><label class="full">说明<textarea v-model="auditNote" maxlength="2000"></textarea></label><button :disabled="busy">提交人工决定</button></form></section>

@@ -20,7 +20,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 @Profile("test")
 public class InMemoryAuthAccountStore implements AuthAccountStore {
-	private final Map<String, StoredAccount> accounts = new ConcurrentHashMap<>();
+	private final Map<UUID, String> passwordHashes = new ConcurrentHashMap<>();
 	private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 	private final Map<String, LoginFailure> failures = new ConcurrentHashMap<>();
 	private final Clock clock = Clock.systemUTC();
@@ -36,19 +36,21 @@ public class InMemoryAuthAccountStore implements AuthAccountStore {
 	}
 
 	@Override
-	public StoredAccount createAccount(UUID publicId, String email, String hash, String displayName) {
+	public synchronized StoredAccount createAccount(UUID publicId, String email, String hash, String displayName) {
 		var account = new StoredAccount(publicId, email, hash, displayName, 0);
-		if (accounts.putIfAbsent(email, account) != null)
+		if (users.findByEmail(email).isPresent())
 			throw new DomainException("EMAIL_EXISTS", "邮箱已注册");
+		passwordHashes.put(publicId, hash);
 		users.save(User.restore(publicId, email, displayName, "", UserStatus.ACTIVE, 0, 0));
 		return account;
 	}
 
 	@Override
 	public Optional<StoredAccount> findByEmail(String normalizedEmail) {
-		return Optional.ofNullable(accounts.get(normalizedEmail)).flatMap(account -> users.findById(account.publicId())
-				.filter(user -> user.status() == UserStatus.ACTIVE).map(user -> new StoredAccount(user.publicId(),
-						normalizedEmail, account.passwordHash(), user.displayName(), user.sessionVersion())));
+		return users.findByEmail(normalizedEmail).filter(user -> user.status() == UserStatus.ACTIVE)
+				.flatMap(user -> Optional.ofNullable(passwordHashes.get(user.publicId()))
+						.map(hash -> new StoredAccount(user.publicId(), user.normalizedEmail(), hash,
+								user.displayName(), user.sessionVersion())));
 	}
 
 	@Override
@@ -88,6 +90,13 @@ public class InMemoryAuthAccountStore implements AuthAccountStore {
 	public synchronized void revokeAllSessions(UUID userId) {
 		sessions.replaceAll((ignored,
 				session) -> session.account.publicId().equals(userId) ? session.withState(State.REVOKED) : session);
+	}
+
+	@Override
+	public void updatePassword(UUID userId, String passwordHash) {
+		if (passwordHashes.replace(userId, passwordHash) == null)
+			throw new DomainException("ACCOUNT_ACTION_INVALID", "验证已失效，请重新申请");
+		users.findById(userId).ifPresent(user -> failures.remove(user.normalizedEmail()));
 	}
 
 	@Override

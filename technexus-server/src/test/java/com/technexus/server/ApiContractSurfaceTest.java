@@ -28,7 +28,8 @@ import org.yaml.snakeyaml.Yaml;
 @ActiveProfiles("test")
 class ApiContractSurfaceTest {
 	private static final Set<String> HTTP_METHODS = Set.of("get", "post", "put", "patch", "delete");
-	private static final Set<String> NON_IDEMPOTENT_MUTATIONS = Set.of("POST /auth/login", "POST /auth/refresh");
+	private static final Set<String> NON_IDEMPOTENT_MUTATIONS = Set.of("POST /auth/login", "POST /auth/refresh",
+			"POST /auth/reset-password", "POST /me/email-verification", "POST /me/email-change");
 	private static final Set<String> BODYLESS_MUTATIONS = Set.of("POST /auth/refresh", "POST /auth/logout",
 			"POST /files/uploads/{uploadId}/complete", "POST /files/{fileId}/download-url",
 			"POST /notifications/{notificationId}/read");
@@ -84,8 +85,8 @@ class ApiContractSurfaceTest {
 					assertJsonSchema(document, operation.get("requestBody"), key + " requestBody");
 			});
 		});
-		assertEquals(49, paths.size());
-		assertEquals(61, operationIds.size());
+		assertEquals(57, paths.size());
+		assertEquals(70, operationIds.size());
 		return new Contract(successStatuses);
 	}
 

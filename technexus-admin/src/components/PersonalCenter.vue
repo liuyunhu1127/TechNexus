@@ -1,13 +1,30 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import AccountAvatarEditor from '../../../frontend-shared/AccountAvatarEditor.vue'
 import { api } from '../api'
 import { userStatuses, type RunAction } from './management'
 
 type Profile = { id: string, displayName: string, bio: string, status: string, version: number }
 
 const props = defineProps<{ account: string, token: string, busy: boolean, run: RunAction }>()
+const emit = defineEmits<{ avatarChanged: [url: string | null] }>()
 const profile = ref<Profile | null>(null)
 const form = reactive({ displayName: '', bio: '' })
+
+function request<T>(path: string, options?: { method?: string, body?: unknown }) {
+  return api<T>(path, props.token, options)
+}
+
+function avatarChanged(url: string | null) {
+  emit('avatarChanged', url)
+  const current = profile.value
+  if (!current) return
+  void props.run(async () => {
+    const { data } = await request<{ data: Profile }>('/me')
+    if (profile.value === current && data.displayName === current.displayName && data.bio === current.bio)
+      profile.value = data
+  }, '')
+}
 
 function edit(value: Profile) {
   profile.value = value
@@ -38,6 +55,7 @@ onMounted(load)
 
 <template>
   <section class="panel">
+    <AccountAvatarEditor v-if="profile" :request="request" :name="profile.displayName" @changed="avatarChanged" />
     <dl v-if="profile" class="management-meta">
       <div><dt>登录账号</dt><dd>{{ account }}</dd></div>
       <div><dt>账号状态</dt><dd>{{ userStatuses[profile.status] ?? profile.status }}</dd></div>

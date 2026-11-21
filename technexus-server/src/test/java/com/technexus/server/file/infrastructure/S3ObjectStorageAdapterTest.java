@@ -50,6 +50,7 @@ class S3ObjectStorageAdapterTest {
 	@Test
 	void sendsServerSideObjectRequestsToTheInternalEndpoint() throws Exception {
 		var requests = new ConcurrentLinkedQueue<String>();
+		var avatarContentTypes = new ConcurrentLinkedQueue<String>();
 		var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/storage/technexus-files/", exchange -> {
 			try (exchange) {
@@ -63,6 +64,12 @@ class S3ObjectStorageAdapterTest {
 					exchange.sendResponseHeaders(200, 2);
 					exchange.getResponseBody().write("ok".getBytes(StandardCharsets.UTF_8));
 				} else {
+					if (exchange.getRequestURI().getPath().endsWith("/avatars/a.png")) {
+						avatarContentTypes.add(exchange.getRequestHeaders().getFirst("Content-Type"));
+						try (var input = exchange.getRequestBody()) {
+							avatarContentTypes.add(new String(input.readAllBytes(), StandardCharsets.UTF_8));
+						}
+					}
 					exchange.sendResponseHeaders(204, -1);
 				}
 			}
@@ -78,9 +85,12 @@ class S3ObjectStorageAdapterTest {
 				assertEquals("ok", new String(content.readAllBytes(), StandardCharsets.UTF_8));
 			}
 			separated.quarantine("uploads/a.txt", "quarantine/a.txt");
+			separated.storeAvatar("avatars/a.png", "png-test-body".getBytes(StandardCharsets.UTF_8));
 			assertEquals(List.of("HEAD /storage/technexus-files/uploads/a.txt",
 					"GET /storage/technexus-files/uploads/a.txt", "PUT /storage/technexus-files/quarantine/a.txt",
-					"DELETE /storage/technexus-files/uploads/a.txt"), List.copyOf(requests));
+					"DELETE /storage/technexus-files/uploads/a.txt", "PUT /storage/technexus-files/avatars/a.png"),
+					List.copyOf(requests));
+			assertEquals(List.of("image/png", "png-test-body"), List.copyOf(avatarContentTypes));
 		} finally {
 			server.stop(0);
 		}

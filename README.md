@@ -127,6 +127,24 @@ $env:TECHNEXUS_AI_ENABLED='false'
 | `TECHNEXUS_CLAMAV_*` | 文件功能必填 | daemon 地址、端口、超时和轮询周期 |
 | `TECHNEXUS_AI_*` | AI 开启时必填 | 默认关闭；开启时必须配置兼容 API 和 Key |
 
+### 3.3 本地测试邮箱
+
+默认关闭发信。先在本机启动仅监听回环地址的 SMTP 测试收件箱，以下配置适用于在 1025 端口接收邮件的本地收件箱。
+
+```powershell
+$env:TECHNEXUS_ACCOUNT_MAIL_ENABLED='true'
+$env:TECHNEXUS_ACCOUNT_MAIL_FROM='notifications@example.test'
+$env:TECHNEXUS_ACCOUNT_WEB_ORIGIN='http://localhost:3000'
+$env:TECHNEXUS_SMTP_HOST='127.0.0.1'
+$env:TECHNEXUS_SMTP_PORT='1025'
+$env:TECHNEXUS_SMTP_AUTH='false'
+$env:TECHNEXUS_SMTP_STARTTLS='false'
+```
+
+启动后端和用户端后，用测试账号在「个人中心」验证邮箱、换绑邮箱，或从登录页进入「忘记密码」。邮件在本地收件箱查看。普通用户已验证的邮箱可用于自助找回密码。使用完整头像功能时，还需启动对象存储和 ClamAV。
+
+后端的 `AccountCenterHttpIntegrationTest` 会启动临时本地 SMTP 收件箱，并验证验证码、重置链接、会话撤销和 Bootstrap 管理员限制。
+
 ## 4. 构建和验证
 
 在仓库根目录执行后端全量验证：
@@ -295,7 +313,7 @@ Access Token 仅保存在 Nuxt 内存状态中；页面刷新时使用 `HttpOnly
 
 用户端已经支持内容和需求的公开列表/详情、草稿创建与编辑、提交审核、已发布需求的方案提交、评论提交，以及标签选择、文件直传、安全扫描、内容绑定和授权下载。标签创建、启停、别名和合并属于管理端运营能力；其余完整业务状态流仍在阶段四待办中。尚未提供的操作应使用受控 API 客户端，并以 `docs/technexus-solution-closure/02-设计阶段/openapi.yaml` 为准。
 
-所有 POST、PUT、PATCH、DELETE 请求除登录和刷新外，均应带唯一的 `Idempotency-Key`。更新、提交、审核和定价操作还需提交服务端返回的当前版本，旧版本会返回 409。
+按 OpenAPI 契约提交 `Idempotency-Key`。登录、刷新、申请邮箱验证码和提交新密码可直接发送。更新、提交、审核和定价操作还需提交服务端返回的当前版本，旧版本会返回 409。
 
 ### 7.4 会话和 CSRF
 
@@ -306,6 +324,13 @@ Access Token 仅保存在 Nuxt 内存状态中；页面刷新时使用 `HttpOnly
 - Refresh Token 重用会撤销整个令牌族，用户需要重新登录。
 
 完整会话 Cookie 使用 `Secure` 属性。除 localhost 开发外，应通过 HTTPS 访问。
+
+### 7.5 个人中心与找回密码
+
+- 在「个人中心」选择 JPEG 或 PNG 图片，预览并保存头像。图片大小上限为 5 MiB，宽高各不超过 4096 像素。通过安全扫描后显示新头像，移除后显示默认头像。
+- 未验证的账号先用当前密码申请原邮箱验证码。换绑时输入当前密码和新邮箱，分别确认两个邮箱收到的验证码，完成后使用新邮箱重新登录。
+- 忘记密码时，在登录页选择「忘记密码」，填写当前已验证邮箱。打开邮件中的一次性链接并输入两遍新密码。链接有效期 15 分钟，重置后所有旧会话失效。
+- Bootstrap 管理员可以在管理端个人中心更换头像。邮箱换绑和密码恢复由人工流程处理。
 
 ## 8. 运营管理员操作手册
 

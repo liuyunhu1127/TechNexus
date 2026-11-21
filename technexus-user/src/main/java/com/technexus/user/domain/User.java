@@ -3,13 +3,16 @@ package com.technexus.user.domain;
 import com.technexus.common.domain.AggregateRoot;
 import com.technexus.common.domain.DomainException;
 import com.technexus.common.domain.SimpleDomainEvent;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 public final class User extends AggregateRoot {
 	private final UUID publicId;
-	private final String normalizedEmail;
+	private String normalizedEmail;
+	private boolean emailVerified;
+	private String avatarObjectKey;
 	private UserStatus status;
 	private String displayName;
 	private String bio;
@@ -72,12 +75,44 @@ public final class User extends AggregateRoot {
 
 	public static User restore(UUID publicId, String normalizedEmail, String displayName, String bio, UserStatus status,
 			long sessionVersion, long version) {
+		return restore(publicId, normalizedEmail, displayName, bio, status, sessionVersion, version, false, null);
+	}
+
+	public static User restore(UUID publicId, String normalizedEmail, String displayName, String bio, UserStatus status,
+			long sessionVersion, long version, boolean emailVerified, String avatarObjectKey) {
 		var user = new User(publicId, normalizedEmail, displayName);
 		user.bio = requireBio(bio);
 		user.status = Objects.requireNonNull(status);
 		user.sessionVersion = sessionVersion;
+		user.emailVerified = emailVerified;
+		user.avatarObjectKey = avatarObjectKey;
 		user.restoreVersion(version);
 		return user;
+	}
+
+	public void verifyEmail() {
+		requireNotCancelled();
+		emailVerified = true;
+		changed();
+	}
+
+	public void changeVerifiedEmail(String email) {
+		requireNotCancelled();
+		if (!emailVerified)
+			throw new DomainException("EMAIL_VERIFICATION_REQUIRED", "请先验证当前邮箱");
+		normalizedEmail = requireEmail(email);
+		revokeAllSessions();
+	}
+
+	public void resetPasswordSessions() {
+		requireNotCancelled();
+		revokeAllSessions();
+	}
+
+	public void changeAvatar(String objectKey) {
+		requireNotCancelled();
+		avatarObjectKey = objectKey;
+		changed();
 	}
 
 	private void revokeAllSessions() {
@@ -93,7 +128,7 @@ public final class User extends AggregateRoot {
 	}
 
 	private static String requireEmail(String email) {
-		var value = Objects.requireNonNull(email).trim().toLowerCase();
+		var value = Objects.requireNonNull(email).trim().toLowerCase(Locale.ROOT);
 		if (!value.contains("@") || value.length() > 254)
 			throw new DomainException("EMAIL_INVALID", "邮箱格式无效");
 		return value;
@@ -118,6 +153,12 @@ public final class User extends AggregateRoot {
 	}
 	public String normalizedEmail() {
 		return normalizedEmail;
+	}
+	public boolean emailVerified() {
+		return emailVerified;
+	}
+	public String avatarObjectKey() {
+		return avatarObjectKey;
 	}
 	public UserStatus status() {
 		return status;
