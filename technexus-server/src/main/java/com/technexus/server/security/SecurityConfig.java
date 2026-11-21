@@ -41,7 +41,8 @@ public class SecurityConfig {
 						.requestMatchers("/actuator/health", "/actuator/health/**", "/api/v1/auth/**").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/v1/contents/**", "/api/v1/demands/**", "/api/v1/search",
 								"/api/v1/tags", "/api/v1/recommendations")
-						.permitAll().requestMatchers("/api/v1/admin/**")
+						.permitAll().requestMatchers("/api/v1/admin/users/**", "/api/v1/admin/posts/**")
+						.hasAuthority("SCOPE_admin").requestMatchers("/api/v1/admin/**")
 						.hasAnyAuthority("SCOPE_admin", "SCOPE_operations").anyRequest().authenticated())
 				.exceptionHandling(errors -> errors
 						.authenticationEntryPoint((request, response, error) -> writeProblem(response,

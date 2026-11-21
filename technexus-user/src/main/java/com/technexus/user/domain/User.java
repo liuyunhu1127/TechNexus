@@ -45,6 +45,13 @@ public final class User extends AggregateRoot {
 		revokeAllSessions();
 	}
 
+	public void enable() {
+		if (status != UserStatus.DISABLED)
+			throw new DomainException("USER_TRANSITION_INVALID", "只能恢复已停用的账号");
+		status = UserStatus.ACTIVE;
+		changed();
+	}
+
 	public void cancel() {
 		requireNotCancelled();
 		status = UserStatus.CANCELLED;

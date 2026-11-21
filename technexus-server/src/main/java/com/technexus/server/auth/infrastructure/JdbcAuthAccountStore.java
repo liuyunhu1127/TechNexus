@@ -71,13 +71,16 @@ public class JdbcAuthAccountStore implements AuthAccountStore {
 
 	@Override
 	public void createSession(StoredAccount account, UUID sid, UUID family, byte[] hash, Instant expiresAt) {
-		jdbc.update(
+		var changed = jdbc.update(
 				"""
 						INSERT INTO tn_auth_session(sid,user_id,token_family,refresh_hash,status,expires_at,created_at,updated_at)
-						SELECT ?,u.id,?,?,'ACTIVE',?,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6) FROM tn_user u WHERE u.public_id=?
+						SELECT ?,u.id,?,?,'ACTIVE',?,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6)
+						FROM tn_user u WHERE u.public_id=? AND u.status='ACTIVE' AND u.session_version=?
 						""",
 				UuidBinary.toBytes(sid), UuidBinary.toBytes(family), hash, Timestamp.from(expiresAt),
-				UuidBinary.toBytes(account.publicId()));
+				UuidBinary.toBytes(account.publicId()), account.sessionVersion());
+		if (changed != 1)
+			throw new DomainException("AUTH_INVALID", "账号状态已变化，请重新登录");
 	}
 
 	@Override
@@ -89,7 +92,7 @@ public class JdbcAuthAccountStore implements AuthAccountStore {
 							FROM tn_auth_session s
 							JOIN tn_user u ON u.id=s.user_id
 							JOIN tn_auth_credential c ON c.user_id=u.id
-							WHERE s.refresh_hash=? FOR UPDATE
+							WHERE s.refresh_hash=? AND u.status='ACTIVE' AND c.status='ACTIVE' FOR UPDATE
 							""",
 					(result, row) -> new SessionRow(result.getString("status"),
 							result.getTimestamp("expires_at").toInstant(),
@@ -123,6 +126,14 @@ public class JdbcAuthAccountStore implements AuthAccountStore {
 	public void revokeSession(byte[] refreshHash) {
 		jdbc.update("UPDATE tn_auth_session SET status='REVOKED',updated_at=CURRENT_TIMESTAMP(6) WHERE refresh_hash=?",
 				refreshHash);
+	}
+
+	@Override
+	public void revokeAllSessions(UUID userId) {
+		jdbc.update("""
+				UPDATE tn_auth_session SET status='REVOKED',updated_at=CURRENT_TIMESTAMP(6)
+				WHERE user_id=(SELECT id FROM tn_user WHERE public_id=?) AND status<>'REVOKED'
+				""", UuidBinary.toBytes(userId));
 	}
 
 	@Override

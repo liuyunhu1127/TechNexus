@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.technexus.audit.api.AuditTaskRepository;
 import com.technexus.audit.domain.AuditState;
 import com.technexus.common.domain.DomainException;
+import com.technexus.content.domain.ContentState;
 import com.technexus.server.auth.JdbcLoginRateLimiter;
 import com.technexus.server.auth.application.port.AuthAccountStore.RotationStatus;
 import com.technexus.server.auth.infrastructure.JdbcAuthAccountStore;
 import com.technexus.server.admin.application.AdminApplicationService;
 import com.technexus.server.admin.application.BatchApplicationService;
 import com.technexus.server.admin.application.FeatureFlagEvaluator;
+import com.technexus.server.admin.application.ManagementApplicationService;
 import com.technexus.server.admin.application.port.OperationsRepository;
 import com.technexus.server.content.application.ContentApplicationService;
 import com.technexus.server.community.application.CommunityApplicationService;
@@ -24,6 +26,7 @@ import com.technexus.server.demand.application.DemandApplicationService;
 import com.technexus.server.file.application.port.FileRecordPort;
 import com.technexus.server.web.idempotency.IdempotencyStore.State;
 import com.technexus.server.web.idempotency.JdbcIdempotencyStore;
+import com.technexus.user.domain.UserStatus;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -68,6 +71,8 @@ class MySqlPersistenceIntegrationTest {
 	private DemandApplicationService demands;
 	@Autowired
 	private AdminApplicationService admin;
+	@Autowired
+	private ManagementApplicationService management;
 	@Autowired
 	private BatchApplicationService batches;
 	@Autowired
@@ -114,6 +119,59 @@ class MySqlPersistenceIntegrationTest {
 				"SELECT COUNT(*) FROM tn_auth_session WHERE token_family=? AND status='ACTIVE'", Integer.class,
 				bytes(family));
 		assertEquals(0, active);
+	}
+
+	@Test
+	void managesAccountsAndPostsWithoutReactivatingRevokedSessionsOrDrafts() throws Exception {
+		var operator = account("operator");
+		var email = "managed-" + UUID.randomUUID() + "@example.com";
+		var owner = accounts.createAccount(UUID.randomUUID(), email, "$argon2id$" + "a".repeat(32), "Managed author");
+		var sessionId = UUID.randomUUID();
+		var refresh = hash(UUID.randomUUID().toString());
+		var expires = Instant.now().plusSeconds(300);
+		accounts.createSession(owner, sessionId, UUID.randomUUID(), refresh, expires);
+		var user = management.listUsers(email, UserStatus.ACTIVE, 1).items().getFirst();
+		assertEquals(owner.publicId(), user.id());
+		assertEquals("ADMIN_SELF_ACTION_FORBIDDEN", assertThrows(DomainException.class,
+				() -> management.changeUserStatus(operator, operator, false, 0, "invalid self action")).code());
+		var disabled = management.changeUserStatus(operator, user.id(), false, user.version(), "suspended for review");
+		assertEquals(UserStatus.DISABLED, disabled.status());
+		assertFalse(accounts.isAccessSessionActive(user.id(), sessionId, owner.sessionVersion()));
+		assertTrue(accounts.findByEmail(email).isEmpty());
+		assertEquals(UserStatus.ACTIVE,
+				management.changeUserStatus(operator, user.id(), true, disabled.version(), "review complete").status());
+		assertEquals(RotationStatus.INVALID, accounts
+				.rotateSession(refresh, UUID.randomUUID(), hash(UUID.randomUUID().toString()), expires).status());
+		assertThrows(DomainException.class,
+				() -> accounts.createSession(owner, UUID.randomUUID(), UUID.randomUUID(), new byte[32], expires));
+
+		var title = "Managed post " + UUID.randomUUID();
+		var draft = contents.create(user.id(),
+				new ContentApplicationService.ContentCommand("POST", "PUBLIC", title, null, "Reviewed body"));
+		assertEquals("POST_STATE_INVALID",
+				assertThrows(DomainException.class,
+						() -> management.changePostState(operator, draft.id(), true, draft.version(), "invalid draft"))
+						.code());
+		var submission = contents.submit(draft.id(), user.id(), draft.version());
+		var task = audits.findById(submission.auditTaskId()).orElseThrow();
+		admin.decideAuditTask(task.publicId(), operator,
+				new AdminApplicationService.AuditDecisionCommand("APPROVED", "QUALITY_OK", null, task.version()));
+		var published = management.listPosts(title, ContentState.PUBLISHED, 1).items().getFirst();
+		assertEquals(draft.id(), published.id());
+		var offline = management.changePostState(operator, published.id(), false, published.version(), "policy review");
+		assertEquals(ContentState.OFFLINE, offline.state());
+		assertEquals("RESOURCE_NOT_FOUND",
+				assertThrows(DomainException.class, () -> contents.get(published.id(), null)).code());
+		assertEquals("VERSION_CONFLICT",
+				assertThrows(DomainException.class,
+						() -> management.changePostState(operator, published.id(), true, published.version(), "stale"))
+						.code());
+		var restored = management.changePostState(operator, published.id(), true, offline.version(), "review complete");
+		assertEquals(ContentState.PUBLISHED, restored.state());
+		assertEquals("Reviewed body", contents.get(published.id(), null).body());
+		assertTrue(operations.listOperationAudits("POST_OFFLINE", 10).stream()
+				.anyMatch(entry -> operator.equals(entry.actorId())
+						&& published.id().toString().equals(entry.target().get("targetId"))));
 	}
 
 	@Test

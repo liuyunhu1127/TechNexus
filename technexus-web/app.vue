@@ -20,6 +20,7 @@ async function signOut() {
           <NuxtLink to="/contents/new">发布内容</NuxtLink>
           <NuxtLink to="/demands/new">发布需求</NuxtLink>
           <NuxtLink to="/files/upload">上传文件</NuxtLink>
+          <NuxtLink to="/me">个人中心</NuxtLink>
           <button class="nav-button" type="button" @click="signOut">退出</button>
         </template>
         <template v-else>

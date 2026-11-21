@@ -43,6 +43,7 @@ public final class Post extends AggregateRoot {
 
 	public PostVersion revise(UUID actorId, UUID versionId, String title, String body, Visibility visibility) {
 		requireOwner(actorId);
+		requireNotOffline();
 		if (pendingVersionId != null)
 			throw new DomainException("CONTENT_REVIEW_PENDING", "已有待审版本");
 		var revision = new PostVersion(versionId, versions.size() + 1, title, body);
@@ -54,6 +55,7 @@ public final class Post extends AggregateRoot {
 
 	public UUID submit(UUID actorId) {
 		requireOwner(actorId);
+		requireNotOffline();
 		var candidate = versions.get(versions.size() - 1);
 		candidate.submit();
 		pendingVersionId = candidate.publicId();
@@ -77,6 +79,25 @@ public final class Post extends AggregateRoot {
 		}
 		pendingVersionId = null;
 		changed();
+	}
+
+	public void takeOffline() {
+		if (state != ContentState.PUBLISHED || pendingVersionId != null)
+			throw new DomainException("POST_STATE_INVALID", "只能下架已发布且无待审版本的帖子");
+		state = ContentState.OFFLINE;
+		changed();
+	}
+
+	public void restorePublication() {
+		if (state != ContentState.OFFLINE || publishedVersionId == null || pendingVersionId != null)
+			throw new DomainException("POST_STATE_INVALID", "只能恢复先前已发布的下架帖子");
+		state = ContentState.PUBLISHED;
+		changed();
+	}
+
+	private void requireNotOffline() {
+		if (state == ContentState.OFFLINE)
+			throw new DomainException("CONTENT_FORBIDDEN", "帖子已下架，请联系管理员恢复");
 	}
 
 	private void requireOwner(UUID actorId) {

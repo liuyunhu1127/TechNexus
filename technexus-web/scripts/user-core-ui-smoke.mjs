@@ -20,6 +20,7 @@ const state = {
   requests: [],
   tagsFail: false,
   uploadedBytes: 0,
+  profile: { id: 'ui-user', displayName: '原昵称', bio: '', status: 'ACTIVE', version: 4 },
 }
 
 function assert(condition, message) {
@@ -63,6 +64,16 @@ async function mockApi(request, response, address) {
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/auth/refresh') {
     json(response, 200, { accessToken: 'ui-access-token', csrfToken: 'ui-csrf-token' })
+    return
+  }
+  if (url.pathname === '/api/v1/me') {
+    assert(request.headers.authorization === 'Bearer ui-access-token', 'Personal center request missing authentication')
+    if (request.method === 'PATCH') {
+      const input = JSON.parse((await readBody(request)).toString('utf8'))
+      assert(input.expectedVersion === state.profile.version, 'Personal center update missing expected version')
+      state.profile = { ...state.profile, displayName: input.displayName, bio: input.bio, version: state.profile.version + 1 }
+    }
+    json(response, 200, { data: state.profile })
     return
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/contents') {
@@ -331,6 +342,15 @@ async function main() {
     }
     process.stdout.write('ui_smoke_step=login-pass\n')
 
+    await click(browser, 'nav a[href="/me"]')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("input[autocomplete=nickname]")?.value === "原昵称"'), 'load profile')
+    await setValue(browser, 'input[autocomplete="nickname"]', '用户端测试昵称')
+    await setValue(browser, 'textarea[maxlength="1000"]', '个人中心回归')
+    await click(browser, '.editor-card form button[type="submit"]')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("个人资料已保存")'), 'profile save')
+    assert(state.profile.displayName === '用户端测试昵称' && state.profile.bio === '个人中心回归', 'Profile update not applied')
+    process.stdout.write('ui_smoke_step=profile-pass\n')
+
     await browser.navigate(`http://127.0.0.1:${webPort}/contents/new`)
     await browser.waitFor(() => browser.evaluate('document.querySelectorAll("input[type=checkbox]").length === 2'), 'tag options')
     await click(browser, 'input[type="checkbox"]')
@@ -373,7 +393,7 @@ async function main() {
     await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("无权查看")'), 'permission error')
     process.stdout.write('ui_smoke_step=failure-feedback-pass\n')
 
-    process.stdout.write('ui_smoke_tests=5\nui_smoke_browser=Chromium-CDP\nui_smoke_gate=PASS\n')
+    process.stdout.write('ui_smoke_tests=6\nui_smoke_browser=Chromium-CDP\nui_smoke_gate=PASS\n')
   } finally {
     browser?.close()
     await stopChild(chrome)

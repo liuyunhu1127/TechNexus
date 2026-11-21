@@ -50,6 +50,14 @@ class SecurityHttpIntegrationTest {
 		assertEquals(HttpStatus.FORBIDDEN, denied.getStatusCode());
 		assertEquals("ACCESS_DENIED", denied.getBody().get("code"));
 
+		for (var resource : new String[]{"users", "posts"}) {
+			var management = http.exchange("/api/v1/admin/" + resource, HttpMethod.GET, new HttpEntity<>(headers),
+					Map.class);
+			assertEquals(HttpStatus.FORBIDDEN, management.getStatusCode());
+		}
+		assertEquals(HttpStatus.OK,
+				http.exchange("/api/v1/me", HttpMethod.GET, new HttpEntity<>(headers), Map.class).getStatusCode());
+
 		var failed = http.exchange("/api/v1/test/internal-error", HttpMethod.GET, new HttpEntity<>(headers), Map.class);
 		assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, failed.getStatusCode());
 	}

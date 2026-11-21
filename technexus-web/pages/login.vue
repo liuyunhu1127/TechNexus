@@ -14,7 +14,7 @@ async function login() {
     accessToken.value = response.accessToken
     persistCsrf(response.csrfToken)
     message.value = '登录成功。'
-    await navigateTo('/contents')
+    await navigateTo(route.query.redirect === '/me' ? '/me' : '/contents')
   } catch {
     message.value = '登录失败，请检查邮箱和密码。'
   } finally {

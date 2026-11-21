@@ -18,6 +18,13 @@ const tagTwo = '018f0000-0000-7000-8000-000000000002'
 const batchId = '018f0000-0000-7000-8000-000000000003'
 const actorId = '018f0000-0000-7000-8000-000000000004'
 const state = { requests: [], configPut: null }
+let profile = { id: actorId, displayName: '维护者', bio: '', status: 'ACTIVE', version: 2 }
+let managedUser = { id: tagOne, email: 'member@example.com', displayName: '社区成员', status: 'ACTIVE', version: 4 }
+let post = {
+  id: tagTwo, ownerId: tagOne, ownerName: '社区成员', type: 'POST', state: 'PUBLISHED',
+  title: '调试记录', body: '审核通过的帖子', publishedTitle: '调试记录', publishedBody: '审核通过的帖子',
+  visibility: 'PUBLIC', version: 3,
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -30,7 +37,7 @@ async function body(request) {
 function json(response, status, value) {
   response.writeHead(status, {
     'Access-Control-Allow-Headers': 'Authorization,Content-Type,Idempotency-Key',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,OPTIONS',
 		'Access-Control-Allow-Origin': response.req?.headers.origin ?? '*',
 		'Access-Control-Allow-Credentials': 'true',
     'Content-Type': 'application/json; charset=utf-8',
@@ -63,6 +70,35 @@ async function mockApi(request, response) {
   if (request.headers.authorization === 'Bearer reviewer-token') return json(response, 403, { code: 'ACCESS_DENIED' })
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/dashboard') {
     return json(response, 200, { data: { pendingAudit: 2, pendingPricing: 1, failedJobs: 0, storageAlert: false, backupAlert: false } })
+  }
+  if (url.pathname === '/api/v1/me') {
+    if (request.method === 'PATCH') {
+      const input = await body(request)
+      assert(input.expectedVersion === profile.version, 'Admin profile version missing')
+      profile = { ...profile, displayName: input.displayName, bio: input.bio, version: profile.version + 1 }
+    }
+    return json(response, 200, { data: profile })
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/users') {
+    return json(response, 200, { items: [managedUser], page: 1, hasNext: false })
+  }
+  if (request.method === 'PUT' && url.pathname === `/api/v1/admin/users/${managedUser.id}/status`) {
+    const input = await body(request)
+    assert(input.expectedVersion === managedUser.version && input.reason, 'User moderation must send version and reason')
+    managedUser = { ...managedUser, status: input.enabled ? 'ACTIVE' : 'DISABLED', version: managedUser.version + 1 }
+    return json(response, 200, { data: managedUser })
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/admin/posts') {
+    return json(response, 200, { items: [post], page: 1, hasNext: false })
+  }
+  if (request.method === 'GET' && url.pathname === `/api/v1/admin/posts/${post.id}`) {
+    return json(response, 200, { data: post })
+  }
+  if (request.method === 'PUT' && url.pathname === `/api/v1/admin/posts/${post.id}/publication`) {
+    const input = await body(request)
+    assert(input.expectedVersion === post.version && input.reason, 'Post moderation must send version and reason')
+    post = { ...post, state: input.enabled ? 'PUBLISHED' : 'OFFLINE', version: post.version + 1 }
+    return json(response, 200, { data: post })
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/admin/audit-tasks') {
     return json(response, 200, { items: [{ id: tagOne, targetType: 'CONTENT', targetId: tagTwo, targetVersionId: batchId, state: 'PENDING', version: 0 }] })
@@ -283,7 +319,7 @@ async function main() {
       area.dispatchEvent(new Event('input', { bubbles: true }))
     })()`)
     await clickText(browser, systemPanel, '保存配置')
-    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("HTTP 409")'), 'version conflict')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("记录已被更新")'), 'version conflict')
     assert(state.configPut?.expectedVersion === 3, 'Expected version was not sent')
     process.stdout.write('admin_ui_step=version-conflict-pass\n')
 
@@ -313,10 +349,40 @@ async function main() {
     assert(!await browser.evaluate('document.body.innerText.includes("TAG_UPDATE")'), 'Raw audit action leaked into the page')
     process.stdout.write('admin_ui_step=audit-pass\n')
 
+    await clickText(browser, 'nav', '个人中心')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("input[autocomplete=nickname]")?.value === "维护者"'), 'admin profile')
+    await setValue(browser, 'input[autocomplete="nickname"]', '管理端测试昵称')
+    await clickText(browser, 'main form', '保存资料')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("个人资料已保存")'), 'admin profile save')
+    assert(profile.displayName === '管理端测试昵称', 'Admin profile update not applied')
+
+    await clickText(browser, 'nav', '用户管理')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("社区成员")'), 'management user list')
+    await clickText(browser, 'tbody', '停用')
+    await setValue(browser, '.management-detail textarea', '测试停用')
+    await clickText(browser, '.management-detail', '确认停用')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("已停用")'), 'account disabled')
+    await clickText(browser, 'tbody', '恢复')
+    await setValue(browser, '.management-detail textarea', '测试恢复')
+    await clickText(browser, '.management-detail', '确认恢复')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("正常")'), 'account restored')
+
+    await clickText(browser, 'nav', '帖子管理')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("调试记录")'), 'post list')
+    await clickText(browser, 'tbody', '查看')
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".post-body")?.textContent.includes("审核通过的帖子")'), 'post details')
+    await setValue(browser, '.management-detail textarea', '测试下架')
+    await clickText(browser, '.management-detail', '确认下架')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("已下架")'), 'post offline')
+    await setValue(browser, '.management-detail textarea', '测试恢复发布')
+    await clickText(browser, '.management-detail', '确认恢复发布')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("tbody")?.innerText.includes("已发布")'), 'post restored')
+    process.stdout.write('admin_ui_step=profile-user-post-management-pass\n')
+
     await clickText(browser, 'header', '退出登录')
     await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("管理员登录")'), 'logout return to login')
     process.stdout.write('admin_ui_step=logout-pass\n')
-    process.stdout.write('admin_ui_smoke_tests=8\nadmin_ui_smoke_browser=Chromium-CDP\nadmin_ui_smoke_gate=PASS\n')
+    process.stdout.write('admin_ui_smoke_tests=11\nadmin_ui_smoke_browser=Chromium-CDP\nadmin_ui_smoke_gate=PASS\n')
   } finally {
     browser?.close()
     await stopChild(chrome)

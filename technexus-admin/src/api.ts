@@ -26,8 +26,8 @@ export async function api<T>(path: string, accessToken = '', options: ApiOptions
     headers,
   })
   if (!response.ok) {
-    const problem = await response.json().catch(() => null) as { code?: string, title?: string, message?: string } | null
-    throw new ApiError(response.status, problem?.code ?? 'REQUEST_FAILED', problem?.title ?? problem?.message ?? `HTTP ${response.status}`)
+    const problem = await response.json().catch(() => null) as { code?: string, title?: string, detail?: string, message?: string } | null
+    throw new ApiError(response.status, problem?.code ?? 'REQUEST_FAILED', problem?.detail ?? problem?.title ?? problem?.message ?? `HTTP ${response.status}`)
   }
   if (response.status === 204) return undefined as T
   return await response.json() as T

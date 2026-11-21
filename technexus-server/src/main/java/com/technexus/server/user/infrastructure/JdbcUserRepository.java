@@ -7,6 +7,7 @@ import com.technexus.user.domain.UserStatus;
 import java.nio.ByteBuffer;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.context.annotation.Profile;
@@ -27,6 +28,16 @@ public class JdbcUserRepository implements UserRepository {
 	@Override
 	public Optional<User> findByEmail(String email) {
 		return jdbc.query(select() + " WHERE email_normalized=?", this::map, email).stream().findFirst();
+	}
+
+	@Override
+	public List<User> listForManagement(String query, UserStatus status, int offset, int limit) {
+		var state = status == null ? "" : status.name();
+		return jdbc.query(select() + """
+				 WHERE (?='' OR status=?)
+				   AND (LOCATE(?, LOWER(display_name))>0 OR LOCATE(?, email_normalized)>0)
+				 ORDER BY id DESC LIMIT ? OFFSET ?
+				""", this::map, state, state, query, query, limit, offset);
 	}
 	@Override
 	public void save(User user) {
