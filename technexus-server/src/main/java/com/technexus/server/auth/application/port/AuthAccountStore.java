@@ -10,6 +10,8 @@ public interface AuthAccountStore {
 	void createSession(StoredAccount account, UUID sid, UUID tokenFamily, byte[] refreshHash, Instant expiresAt);
 	Rotation rotateSession(byte[] currentRefreshHash, UUID newSid, byte[] newRefreshHash, Instant newExpiresAt);
 	void revokeSession(byte[] refreshHash);
+	void revokeAllSessions(UUID userId);
+	void updatePassword(UUID userId, String passwordHash);
 	boolean isAccessSessionActive(UUID userId, UUID sid, long sessionVersion);
 	boolean isLoginLocked(String normalizedEmail, Instant now);
 	void recordLoginFailure(String normalizedEmail, Instant now, int threshold, Instant lockedUntil);

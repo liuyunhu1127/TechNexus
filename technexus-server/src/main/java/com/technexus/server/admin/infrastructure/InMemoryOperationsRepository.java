@@ -142,7 +142,8 @@ public class InMemoryOperationsRepository implements OperationsRepository {
 	public DashboardRecord dashboard() {
 		return new DashboardRecord(0, 0, 0, false, true);
 	}
-	private void audit(UUID actorId, String action, Map<String, Object> target) {
+	@Override
+	public void audit(UUID actorId, String action, Map<String, Object> target) {
 		operationAudits
 				.add(new OperationAuditRecord(auditSequence.incrementAndGet(), actorId, action, target, Instant.now()));
 	}

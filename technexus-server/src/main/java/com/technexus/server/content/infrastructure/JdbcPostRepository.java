@@ -49,6 +49,24 @@ public class JdbcPostRepository implements PostRepository {
 	}
 
 	@Override
+	public List<ManagementEntry> listForManagement(String query, ContentState state, int offset, int limit) {
+		var status = state == null ? "" : state.name();
+		return jdbc.query(
+				"""
+						SELECT p.public_id,u.public_id owner_public_id,p.post_type,p.state,p.version,v.title
+						FROM tn_post p JOIN tn_user u ON u.id=p.owner_id
+						JOIN tn_post_version v ON v.id=(SELECT id FROM tn_post_version WHERE post_id=p.id ORDER BY revision DESC LIMIT 1)
+						WHERE (?='' OR p.state=?) AND LOCATE(?,LOWER(v.title))>0
+						ORDER BY p.id DESC LIMIT ? OFFSET ?
+						""",
+				(result, row) -> new ManagementEntry(uuid(result.getBytes("public_id")),
+						uuid(result.getBytes("owner_public_id")), result.getString("title"),
+						PostType.valueOf(result.getString("post_type")),
+						ContentState.valueOf(result.getString("state")), result.getLong("version")),
+				status, status, query, limit, offset);
+	}
+
+	@Override
 	public void add(Post post) {
 		var changed = jdbc.update("""
 				INSERT INTO tn_post(public_id,owner_id,post_type,state,visibility,version,created_at,updated_at)

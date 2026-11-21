@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError } from './api'
+import PersonalCenter from './components/PersonalCenter.vue'
+import PostManagement from './components/PostManagement.vue'
+import UserManagement from './components/UserManagement.vue'
 
-type Section = 'dashboard' | 'audit' | 'pricing' | 'config' | 'ai' | 'operations'
+const navigation = [
+  ['dashboard', '运营总览'], ['users', '用户管理'], ['posts', '帖子管理'],
+  ['audit', '审核任务'], ['pricing', '定价确认'], ['config', '配置中心'],
+  ['ai', 'AI 建议'], ['operations', '运营能力'], ['profile', '个人中心'],
+] as const
+type Section = typeof navigation[number][0]
+const sectionTitles: Record<Section, string> = {
+  dashboard: '运营总览', users: '用户管理', posts: '帖子管理', audit: '审核工作台',
+  pricing: '定价中心', config: '配置中心', ai: 'AI 建议', operations: '运营能力边界', profile: '个人中心',
+}
 type Dashboard = { pendingAudit: number, pendingPricing: number, failedJobs: number, storageAlert: boolean, backupAlert: boolean }
 type AuditTask = { id: string, targetType: string, targetId: string, targetVersionId: string, state: string, version: number }
 type ConfigView = { key: string, value: unknown, version: number }
@@ -17,6 +29,7 @@ type AuthResponse = { accessToken: string, csrfToken: string, expiresIn: number,
 const token = ref('')
 const csrfToken = ref(sessionStorage.getItem('tn_admin_csrf') ?? '')
 const account = ref(sessionStorage.getItem('tn_admin_account') ?? '')
+const accountAvatar = ref<string | null>(null)
 const password = ref('')
 const sessionReady = ref(false)
 const active = ref<Section>('dashboard')
@@ -109,6 +122,10 @@ const aiDecisionOptions = [
   { value: 'REJECT', label: '拒绝' },
 ] as const
 const operationActionOptions = [
+  { value: 'USER_DISABLE', label: '停用账号' },
+  { value: 'USER_ENABLE', label: '恢复账号' },
+  { value: 'POST_OFFLINE', label: '下架帖子' },
+  { value: 'POST_RESTORE', label: '恢复帖子发布' },
   { value: 'CONFIG_UPDATE', label: '更新系统参数' },
   { value: 'FEATURE_FLAG_UPDATE', label: '更新功能开关' },
   { value: 'TAG_CREATE', label: '创建标签' },
@@ -147,11 +164,17 @@ function clearSession() {
   csrfToken.value = ''
   password.value = ''
   dashboard.value = null
+  accountAvatar.value = null
+  active.value = 'dashboard'
   sessionStorage.removeItem('tn_admin_token')
   sessionStorage.removeItem('tn_admin_csrf')
 }
 async function verifyAdministrator() {
   dashboard.value = (await api<{ data: Dashboard }>('/admin/dashboard', token.value)).data
+  const verifiedToken = token.value
+  void api<{ data: { url?: string } }>('/me/avatar', verifiedToken).then(({ data }) => {
+    if (token.value === verifiedToken) accountAvatar.value = data.url ?? null
+  }).catch(() => undefined)
 }
 async function refreshAccessToken() {
   const response = await api<AuthResponse>('/auth/refresh', '', {
@@ -227,6 +250,8 @@ async function run(action: () => Promise<void>, success: string) {
   catch (cause) {
     if (cause instanceof ApiError && cause.status === 401) {
       clearSession(); error.value = '登录已过期，请重新登录。'
+    } else if (cause instanceof ApiError && cause.code === 'VERSION_CONFLICT') {
+      error.value = '记录已被更新，请重新加载后再提交。'
     } else {
       error.value = cause instanceof Error ? `操作失败：${cause.message}` : '操作失败，请检查权限和输入。'
     }
@@ -392,11 +417,14 @@ onMounted(restoreSession)
     </main>
   </div>
   <div v-else class="shell">
-    <aside><strong>TechNexus</strong><span>管理端</span><nav aria-label="管理导航"><button v-for="item in ([['dashboard', '运营总览'], ['audit', '审核任务'], ['pricing', '定价确认'], ['config', '配置中心'], ['ai', 'AI 建议'], ['operations', '运营能力']] as const)" :key="item[0]" :class="{ active: active === item[0] }" @click="show(item[0])">{{ item[1] }}</button></nav></aside>
+    <aside><strong>TechNexus</strong><span>管理端</span><nav aria-label="管理导航"><button v-for="item in navigation" :key="item[0]" type="button" :class="{ active: active === item[0] }" :aria-current="active === item[0] ? 'page' : undefined" :disabled="busy" @click="show(item[0])">{{ item[1] }}</button></nav></aside>
     <main>
-      <header><div><p>运营管理</p><h1>{{ { dashboard: '运营总览', audit: '审核工作台', pricing: '定价中心', config: '配置中心', ai: 'AI 建议', operations: '运营能力边界' }[active] }}</h1></div><div class="session"><span>{{ account }}</span><button class="secondary" :disabled="busy" @click="logout">退出登录</button></div></header>
+      <header><div><p>运营管理</p><h1>{{ sectionTitles[active] }}</h1></div><div class="session"><img v-if="accountAvatar" class="session-avatar" :src="accountAvatar" alt="" referrerpolicy="no-referrer"><span>{{ account }}</span><button class="secondary" :disabled="busy" @click="logout">退出登录</button></div></header>
       <p v-if="error" class="error" role="alert">{{ error }}</p><p v-if="message" class="success" role="status">{{ message }}</p>
       <template v-if="active === 'dashboard'"><div class="actions"><button :disabled="busy || !token" @click="loadDashboard">刷新数据</button></div><section class="cards" aria-label="运营指标"><article v-for="card in dashboardCards" :key="String(card[0])"><span>{{ card[0] }}</span><strong>{{ card[1] }}</strong></article><article v-if="!dashboard"><span>等待连接</span><strong>—</strong></article></section></template>
+      <PersonalCenter v-else-if="active === 'profile'" :account="account" :token="token" :busy="busy" :run="run" @avatar-changed="accountAvatar = $event" />
+      <UserManagement v-else-if="active === 'users'" :account="account" :token="token" :busy="busy" :run="run" />
+      <PostManagement v-else-if="active === 'posts'" :token="token" :busy="busy" :run="run" />
       <section v-else-if="active === 'audit'" class="panel wide"><div class="toolbar"><label>状态<select v-model="auditState"><option value="">全部</option><option v-for="state in auditStateOptions" :key="state.value" :value="state.value">{{ state.label }}</option></select></label><button :disabled="busy || !token" @click="loadAudits">查询</button></div><p v-if="!auditTasks.length" class="muted">暂无已加载任务。</p><div class="table-wrap"><table v-if="auditTasks.length"><thead><tr><th>状态</th><th>目标</th><th>版本</th><th></th></tr></thead><tbody><tr v-for="task in auditTasks" :key="task.id"><td>{{ auditStateLabel(task.state) }}</td><td><code>{{ enumLabel(auditTargetTypeLabels, task.targetType) }} / {{ task.targetId }}</code></td><td>{{ task.version }}</td><td><button class="secondary" @click="selectedAudit = task">处理</button></td></tr></tbody></table></div><form v-if="selectedAudit" class="form-grid" @submit.prevent="decideAudit"><h2>决定任务 {{ selectedAudit.id }}</h2><label>决定<select v-model="auditDecision"><option v-for="decision in auditDecisionOptions" :key="decision.value" :value="decision.value">{{ decision.label }}</option></select></label><label>原因<select v-model="auditReason"><option v-for="reason in auditReasonOptions" :key="reason.value" :value="reason.value">{{ reason.label }}</option></select></label><label class="full">说明<textarea v-model="auditNote" maxlength="2000"></textarea></label><button :disabled="busy">提交人工决定</button></form></section>
       <form v-else-if="active === 'pricing'" class="panel form-grid" @submit.prevent="confirmPrice"><p class="notice">当前版本仅支持免费模式，其他定价模式会由后端拒绝。</p><label>目标类型<select v-model="price.targetType"><option v-for="targetType in pricingTargetTypeOptions" :key="targetType.value" :value="targetType.value">{{ targetType.label }}</option></select></label><label>目标 UUID<input v-model.trim="price.targetId" required></label><label>当前版本<input v-model.number="price.expectedVersion" min="0" type="number"></label><label class="full">确认原因<textarea v-model.trim="price.reason" required maxlength="1000"></textarea></label><button :disabled="busy || !token">确认免费定价</button></form>
       <section v-else-if="active === 'config'" class="stack">

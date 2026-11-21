@@ -20,7 +20,14 @@ const state = {
   requests: [],
   tagsFail: false,
   uploadedBytes: 0,
+  profile: { id: 'ui-user', displayName: '原昵称', bio: '', status: 'ACTIVE', version: 4 },
+  security: { email: 'ui@example.com', verified: false, bootstrapAdmin: false, mailEnabled: true },
+  avatar: null,
+  object: null,
 }
+const oldCode = 'A'.repeat(22) + '-_'
+const newCode = 'B'.repeat(22) + '_-'
+const resetToken = '018f0000-0000-7000-8000-000000000001.' + newCode
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -51,9 +58,14 @@ async function mockApi(request, response, address) {
     return
   }
   if (request.method === 'PUT' && url.pathname === '/objects/file-1') {
-    state.uploadedBytes = (await readBody(request)).length
+    state.object = await readBody(request)
+    state.uploadedBytes = state.object.length
     json(response, 200, {})
     return
+  }
+  if (request.method === 'GET' && url.pathname === '/objects/file-1' && state.avatar) {
+    response.writeHead(200, { 'Content-Type': 'image/png' })
+    return response.end(state.object)
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/auth/login') {
     json(response, 200, { accessToken: 'ui-access-token', csrfToken: 'ui-csrf-token' }, {
@@ -63,6 +75,51 @@ async function mockApi(request, response, address) {
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/auth/refresh') {
     json(response, 200, { accessToken: 'ui-access-token', csrfToken: 'ui-csrf-token' })
+    return
+  }
+  if (url.pathname === '/api/v1/me/avatar') {
+    if (request.method === 'PUT') {
+      const input = JSON.parse(await readBody(request))
+      assert(input.expectedVersion === state.profile.version && input.fileId === 'file-1', 'Avatar must reference the latest profile and scanned file')
+      state.avatar = `http://127.0.0.1:${address.port}/objects/file-1`
+      state.profile.version++
+      return json(response, 200, { data: { version: state.profile.version } })
+    }
+    return json(response, 200, { data: { url: state.avatar, version: state.profile.version } })
+  }
+  if (url.pathname === '/api/v1/me/security') return json(response, 200, { data: state.security })
+  if (['/api/v1/me/email-verification', '/api/v1/me/email-change'].includes(url.pathname)) {
+    const input = JSON.parse(await readBody(request))
+    assert(input.password, 'Current password missing from email request')
+    if (url.pathname.endsWith('email-change')) assert(state.security.verified && input.email === 'new@example.test', 'Email change request invalid')
+    return json(response, 202, { data: { requestId: 'local-email-action' } })
+  }
+  if (url.pathname === '/api/v1/me/email-verification/confirm') {
+    const input = JSON.parse(await readBody(request))
+    assert(input.requestId === 'local-email-action' && input.code === oldCode, 'Email verification payload invalid')
+    state.security.verified = true
+    return json(response, 204)
+  }
+  if (url.pathname === '/api/v1/me/email-change/confirm') {
+    const input = JSON.parse(await readBody(request))
+    assert(input.requestId === 'local-email-action' && input.oldCode === oldCode && input.newCode === newCode, 'Dual email codes missing')
+    state.security.email = 'new@example.test'
+    return json(response, 204)
+  }
+  if (url.pathname === '/api/v1/auth/forgot-password') return json(response, 202, { message: '已接收' })
+  if (url.pathname === '/api/v1/auth/reset-password') {
+    const input = JSON.parse(await readBody(request))
+    assert(input.token === resetToken && input.password === 'Browser-new-password!', 'Password reset payload invalid')
+    return json(response, 204)
+  }
+  if (url.pathname === '/api/v1/me') {
+    assert(request.headers.authorization === 'Bearer ui-access-token', 'Personal center request missing authentication')
+    if (request.method === 'PATCH') {
+      const input = JSON.parse((await readBody(request)).toString('utf8'))
+      assert(input.expectedVersion === state.profile.version, 'Personal center update missing expected version')
+      state.profile = { ...state.profile, displayName: input.displayName, bio: input.bio, version: state.profile.version + 1 }
+    }
+    json(response, 200, { data: state.profile })
     return
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/contents') {
@@ -75,11 +132,12 @@ async function mockApi(request, response, address) {
     return
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/files/uploads') {
+    const input = JSON.parse(await readBody(request))
     json(response, 201, {
       data: {
         expiresAt: '2026-10-29T18:00:00Z',
         fileId: 'file-1',
-        requiredHeaders: { 'Content-Type': 'text/plain' },
+        requiredHeaders: { 'Content-Type': input.declaredMime },
         state: 'UPLOADING',
         uploadId: 'upload-1',
         uploadUrl: `http://127.0.0.1:${address.port}/objects/file-1`,
@@ -331,6 +389,15 @@ async function main() {
     }
     process.stdout.write('ui_smoke_step=login-pass\n')
 
+    await click(browser, 'nav a[href="/me"]')
+    await browser.waitFor(() => browser.evaluate('document.querySelector("input[autocomplete=nickname]")?.value === "原昵称"'), 'load profile')
+    await setValue(browser, 'input[autocomplete="nickname"]', '用户端测试昵称')
+    await setValue(browser, 'textarea[maxlength="1000"]', '个人中心回归')
+    await click(browser, '.editor-card form button[type="submit"]')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("个人资料已保存")'), 'profile save')
+    assert(state.profile.displayName === '用户端测试昵称' && state.profile.bio === '个人中心回归', 'Profile update not applied')
+    process.stdout.write('ui_smoke_step=profile-pass\n')
+
     await browser.navigate(`http://127.0.0.1:${webPort}/contents/new`)
     await browser.waitFor(() => browser.evaluate('document.querySelectorAll("input[type=checkbox]").length === 2'), 'tag options')
     await click(browser, 'input[type="checkbox"]')
@@ -373,7 +440,62 @@ async function main() {
     await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("无权查看")'), 'permission error')
     process.stdout.write('ui_smoke_step=failure-feedback-pass\n')
 
-    process.stdout.write('ui_smoke_tests=5\nui_smoke_browser=Chromium-CDP\nui_smoke_gate=PASS\n')
+    state.blockedUpload = false
+    await browser.navigate(`http://127.0.0.1:${webPort}/me`)
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".avatar-editor input[type=file]:enabled") !== null'), 'avatar editor loaded')
+    await browser.evaluate(`(async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 16
+      canvas.height = 8
+      canvas.getContext('2d').fillRect(0, 0, 8, 8)
+      const img = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      const transfer = new DataTransfer()
+      transfer.items.add(new File([img], 'avatar.png', { type: 'image/png' }))
+      const input = document.querySelector('.avatar-editor input[type=file]')
+      input.files = transfer.files
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })()`)
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".avatar-actions .primary") !== null'), 'cropped avatar preview')
+    await click(browser, '.avatar-actions .primary')
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".account-link img")?.naturalWidth === 512'), 'avatar displayed in navigation')
+    process.stdout.write('ui_smoke_step=avatar-pass\n')
+
+    await click(browser, '.email-settings > button')
+    await setValue(browser, '.email-settings input[type=password]', 'correct-horse-battery-staple')
+    await click(browser, '.email-settings button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".email-settings input[autocomplete=one-time-code]") !== null'), 'email verification form')
+    await setValue(browser, '.email-settings input[autocomplete=one-time-code]', oldCode)
+    await click(browser, '.email-settings button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".email-settings > button")?.textContent.includes("换绑邮箱")'), 'email verified in UI')
+    await click(browser, '.email-settings > button')
+    await setValue(browser, '.email-settings input[type=email]', 'new@example.test')
+    await setValue(browser, '.email-settings input[type=password]', 'correct-horse-battery-staple')
+    await click(browser, '.email-settings button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('document.querySelector(".email-settings input[autocomplete=off]") !== null'), 'dual-code form')
+    await setValue(browser, '.email-settings input[autocomplete=one-time-code]', oldCode)
+    await setValue(browser, '.email-settings input[autocomplete=off]', newCode)
+    await click(browser, '.email-settings button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('location.pathname === "/login" && location.search.includes("emailChanged=1")'), 'relogin after email change')
+    assert(state.security.email === 'new@example.test', 'Email change not applied')
+    process.stdout.write('ui_smoke_step=email-change-pass\n')
+
+    await click(browser, '.auth-card a[href="/forgot-password"]')
+    await browser.waitFor(() => browser.evaluate('location.pathname === "/forgot-password" && !!document.querySelector("input[type=email]")'), 'forgot password form')
+    await setValue(browser, 'input[type=email]', state.security.email)
+    await click(browser, '.auth-card button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("如果该邮箱符合重置条件")'), 'generic forgot password acknowledgment')
+    await browser.navigate(`http://127.0.0.1:${webPort}/reset-password#token=${resetToken}`)
+    await browser.waitFor(() => browser.evaluate('!location.hash && document.querySelectorAll("input[type=password]").length === 2'), 'reset form and token removed from location')
+    await setValue(browser, '.auth-card label:nth-of-type(1) input', 'Browser-new-password!')
+    await setValue(browser, '.auth-card label:nth-of-type(2) input', 'Different-password!')
+    await click(browser, '.auth-card button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('document.body.innerText.includes("两次输入的密码不一致")'), 'password mismatch')
+    await setValue(browser, '.auth-card label:nth-of-type(2) input', 'Browser-new-password!')
+    await click(browser, '.auth-card button[type=submit]')
+    await browser.waitFor(() => browser.evaluate('location.pathname === "/login" && location.search.includes("passwordReset=1")'), 'relogin after password reset')
+    process.stdout.write('ui_smoke_step=password-reset-pass\n')
+
+    process.stdout.write('ui_smoke_tests=9\nui_smoke_browser=Chromium-CDP\nui_smoke_gate=PASS\n')
   } finally {
     browser?.close()
     await stopChild(chrome)

@@ -33,6 +33,7 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.6rem); letter-spacing: -.05em; }
 h2 { grid-column: 1 / -1; margin: 0 0 .4rem; }
 .session { display: flex; align-items: center; gap: .75rem; color: #66766c; }
 .session span { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-avatar { width: 2rem; height: 2rem; border-radius: 50%; object-fit: cover; }
 button { border: 0; border-radius: 999px; padding: .75rem 1rem; background: #176c4c; color: white; cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 button.secondary { background: #e4eee8; color: #174c38; }
@@ -62,4 +63,11 @@ pre { overflow: auto; padding: 1rem; border-radius: 10px; background: #f4f7f5; }
 .error { color: #a52626; }
 .success { color: #176c4c; }
 .muted { color: #66766c; }
+.management-toolbar { flex-wrap: wrap; margin-top: 0; }
+.management-toolbar label { min-width: min(100%, 220px); }
+.management-detail { border-top: 1px solid #dbe3dc; margin-top: 1.25rem; padding-top: 1.25rem; }
+.management-meta { display: flex; flex-wrap: wrap; gap: 1rem 2rem; margin: .8rem 0 1.2rem; }
+.management-meta dt { color: #66766c; font-size: .88rem; }
+.management-meta dd { margin: .35rem 0 0; overflow-wrap: anywhere; }
+.post-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; }
 @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } aside nav { grid-template-columns: repeat(2, 1fr); } main { padding-top: 1.5rem; } header { align-items: flex-start; gap: 1rem; } .session { align-items: flex-end; flex-direction: column; } .form-grid { grid-template-columns: 1fr; } .form-grid > * { grid-column: 1 !important; } }

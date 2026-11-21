@@ -39,5 +39,13 @@ export default defineNuxtConfig({
       ]
     }
   },
-  typescript: { strict: true, typeCheck: true }
+  vite: {
+    resolve: { dedupe: ['vue'] },
+    server: { fs: { allow: ['.', '../frontend-shared'] } },
+  },
+  typescript: {
+    strict: true,
+    typeCheck: true,
+    tsConfig: { compilerOptions: { paths: { vue: ['../node_modules/vue'] } } },
+  },
 })

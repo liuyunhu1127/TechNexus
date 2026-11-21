@@ -1,6 +1,25 @@
 <script setup lang="ts">
+import { useState } from '#imports'
+import { watch } from 'vue'
+
 const route = useRoute()
-const { isAuthenticated, logout } = useApi()
+const { accessToken, isAuthenticated, logout, request } = useApi()
+const avatarUrl = useState<string | null>('account-avatar-url', () => null)
+
+if (import.meta.client) {
+  watch(accessToken, async (token, _, onCleanup) => {
+    let cancelled = false
+    onCleanup(() => { cancelled = true })
+    avatarUrl.value = null
+    if (!token) return
+    try {
+      const { data } = await request<{ data: { url?: string } }>('/me/avatar')
+      if (!cancelled) avatarUrl.value = data.url ?? null
+    } catch {
+      // The navigation remains available when the object store is unavailable.
+    }
+  }, { immediate: true })
+}
 
 async function signOut() {
   await logout()
@@ -20,6 +39,10 @@ async function signOut() {
           <NuxtLink to="/contents/new">发布内容</NuxtLink>
           <NuxtLink to="/demands/new">发布需求</NuxtLink>
           <NuxtLink to="/files/upload">上传文件</NuxtLink>
+          <NuxtLink to="/me" class="account-link">
+            <img v-if="avatarUrl" :src="avatarUrl" alt="" referrerpolicy="no-referrer">
+            个人中心
+          </NuxtLink>
           <button class="nav-button" type="button" @click="signOut">退出</button>
         </template>
         <template v-else>
@@ -32,3 +55,8 @@ async function signOut() {
     <footer>TechNexus · Technology Community &amp; Solution Platform</footer>
   </div>
 </template>
+
+<style scoped>
+.account-link { display: inline-flex; align-items: center; gap: .4rem; }
+.account-link img { width: 1.5rem; height: 1.5rem; border-radius: 50%; object-fit: cover; }
+</style>

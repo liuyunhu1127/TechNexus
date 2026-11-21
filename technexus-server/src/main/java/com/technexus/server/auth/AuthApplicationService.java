@@ -95,7 +95,11 @@ public class AuthApplicationService {
 	}
 
 	private boolean isAdministrator(StoredAccount account) {
-		return account.normalizedEmail().equals(bootstrapAdminEmail);
+		return isBootstrapEmail(account.normalizedEmail());
+	}
+
+	public boolean isBootstrapEmail(String normalizedEmail) {
+		return normalizedEmail.equals(bootstrapAdminEmail);
 	}
 
 	private static String newRefreshToken() {

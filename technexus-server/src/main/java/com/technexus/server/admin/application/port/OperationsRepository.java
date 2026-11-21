@@ -23,6 +23,7 @@ public interface OperationsRepository {
 	AiSuggestionRecord decideSuggestion(UUID id, String decision, Map<String, Object> editedOutput,
 			long expectedVersion, UUID actorId);
 	List<OperationAuditRecord> listOperationAudits(String action, int limit);
+	void audit(UUID actorId, String action, Map<String, Object> target);
 	DashboardRecord dashboard();
 
 	record ConfigRecord(String key, Object value, long version) {

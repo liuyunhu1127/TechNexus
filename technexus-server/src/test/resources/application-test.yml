@@ -3,6 +3,8 @@ spring:
     url: jdbc:h2:mem:technexus;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
     username: sa
     password: ""
+    hikari:
+      connection-init-sql: SET TIME ZONE 'UTC'
   flyway:
     enabled: false
 

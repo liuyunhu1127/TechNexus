@@ -265,7 +265,8 @@ public class JdbcOperationsRepository implements OperationsRepository {
 				value(backupConfigured) == 0);
 	}
 
-	private void audit(UUID actorId, String action, Map<String, Object> target) {
+	@Override
+	public void audit(UUID actorId, String action, Map<String, Object> target) {
 		var changed = jdbc.update("""
 				INSERT INTO tn_operation_audit(actor_id,action,target,created_at,updated_at)
 				SELECT id,?,?,CURRENT_TIMESTAMP(6),CURRENT_TIMESTAMP(6) FROM tn_user WHERE public_id=?
